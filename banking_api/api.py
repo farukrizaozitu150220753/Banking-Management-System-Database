@@ -278,6 +278,107 @@ credit_score_args.add_argument('score', type=float, required=True, help='Credit 
 credit_score_args.add_argument('risk_category', type=str, required=True, help='Risk category is required')
 credit_score_args.add_argument('computed_by_system', type=bool, required=True, help='Computed by system is required')
 
+branch_fields = {
+    'branch_id': fields.String,
+    'branch_name': fields.String,
+    'address_line1': fields.String,
+    'address_line2': fields.String,
+    'city': fields.String,
+    'state': fields.String,
+    'zip_code': fields.String,
+    'phone_number': fields.String,
+}
+
+customer_fields = {
+    'customer_id': fields.String,
+    'first_name': fields.String,
+    'last_name': fields.String,
+    'date_of_birth': fields.String,
+    'phone_number': fields.String,
+    'email': fields.String,
+    'address_line1': fields.String,
+    'address_line2': fields.String,
+    'city': fields.String,
+    'state': fields.String,
+    'zip_code': fields.String,
+    'branch_id': fields.String,
+}
+
+account_fields = {
+    'account_id': fields.String,
+    'customer_id': fields.String,
+    'account_type': fields.String,
+    'balance': fields.Float,
+    'creation_date': fields.DateTime,
+}
+
+loan_fields = {
+    'loan_id': fields.String,
+    'customer_id': fields.String,
+    'loan_type': fields.String,
+    'principal_amount': fields.Float,
+    'interest_rate': fields.Float,
+    'start_date': fields.String,
+    'end_date': fields.String,
+    'status': fields.String,
+}
+
+loan_payment_fields = {
+    'loan_payment_id': fields.String,
+    'loan_id': fields.String,
+    'payment_date': fields.String,
+    'payment_amount': fields.Float,
+    'remaining_balance': fields.Float,
+}
+
+employee_fields = {
+    'employee_id': fields.String,
+    'branch_id': fields.String,
+    'first_name': fields.String,
+    'last_name': fields.String,
+    'position': fields.String,
+    'hire_date': fields.DateTime,
+    'phone_number': fields.String,
+    'email': fields.String,
+}
+
+card_fields = {
+    'card_id': fields.String,
+    'account_id': fields.String,
+    'card_type': fields.String,
+    'card_number': fields.String,
+    'expiration_date': fields.String,
+    'cvv': fields.String,
+    'status': fields.String,
+}
+
+transaction_fields = {
+    'transaction_id': fields.String,
+    'from_account_id': fields.String,
+    'to_account_id': fields.String,
+    'transaction_type': fields.String,
+    'amount': fields.Float,
+    'transaction_timestamp': fields.DateTime,
+}
+
+customer_support_fields = {
+    'ticket_id': fields.String,
+    'customer_id': fields.String,
+    'issue_description': fields.String,
+    'status': fields.String,
+    'resolution_details': fields.String,
+    'created_date': fields.DateTime,
+    'resolved_date': fields.DateTime,
+}
+
+credit_score_fields = {
+    'credit_score_id': fields.String,
+    'customer_id': fields.String,
+    'score': fields.Float,
+    'risk_category': fields.String,
+    'computed_by_system': fields.Boolean,
+}
+
 @app.route('/')
 def home():
     return '<h1>Welcome to the Banking API!</h1>'
