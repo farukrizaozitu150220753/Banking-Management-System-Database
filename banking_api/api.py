@@ -4,10 +4,12 @@ from datetime import datetime
 import uuid
 from sqlalchemy.dialects.mysql import BINARY
 from sqlalchemy.ext.hybrid import hybrid_property
+from flask_restful import Resource, Api, reqparse, fields, marshal_with, abort
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///banking_management.db'
 db = SQLAlchemy(app)
+api = Api(app)
 
 def generate_uuid():
     return uuid.uuid4().bytes
@@ -176,7 +178,7 @@ class CustomerSupport(db.Model):
     customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id'), nullable=False)
     issue_description = db.Column(db.Text, nullable=False)
     status = db.Column(db.Enum('OPEN', 'IN_PROGRESS', 'RESOLVED'), nullable=False, default='OPEN')
-    resolution_details = db.Column(db.Text)
+    resolution_details = db.Column(db.Text, nullable=True)
     created_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     resolved_date = db.Column(db.DateTime)
         
@@ -197,7 +199,84 @@ class CreditScore(db.Model):
     )
         
     def __repr__(self):
-        return f"CustomerSupport(ticket_id = {self.ticket_id}, customer_id = {self.customer_id}, issue_description = {self.issue_description}, status = {self.status}, resolution_details = {self.resolution_details}, created_date = {self.created_date}, resolved_date = {self.resolved_date})"
+        return f"CreditScore(credit_score_id = {self.credit_score_id}, customer_id = {self.customer_id}, score = {self.score}, risk_category = {self.risk_category}, computed_by_system = {self.computed_by_system})"
+
+branch_args = reqparse.RequestParser()
+branch_args.add_argument('branch_name', type=str, required=True, help='Branch name is required')
+branch_args.add_argument('address_line1', type=str, required=True, help='Address line 1 is required')
+branch_args.add_argument('address_line2', type=str)
+branch_args.add_argument('city', type=str, required=True, help='City is required')
+branch_args.add_argument('state', type=str, required=True, help='State is required')
+branch_args.add_argument('zip_code', type=str, required=True, help='Zip code is required')
+branch_args.add_argument('phone_number', type=str, required=True, help='Phone number is required')
+
+customer_args = reqparse.RequestParser()
+customer_args.add_argument('first_name', type=str, required=True, help='First name is required')
+customer_args.add_argument('last_name', type=str, required=True, help='Last name is required')
+customer_args.add_argument('date_of_birth', type=str, required=True, help='Date of birth is required')
+customer_args.add_argument('phone_number', type=str, required=True, help='Phone number is required')
+customer_args.add_argument('email', type=str, required=True, help='Email is required')
+customer_args.add_argument('address_line1', type=str, required=True, help='Address line 1 is required')
+customer_args.add_argument('address_line2', type=str)
+customer_args.add_argument('city', type=str, required=True, help='City is required')
+customer_args.add_argument('state', type=str, required=True, help='State is required')
+customer_args.add_argument('zip_code', type=str, required=True, help='Zip code is required')
+customer_args.add_argument('branch_id', type=str, required=True, help='Branch ID is required')
+
+account_args = reqparse.RequestParser()
+account_args.add_argument('customer_id', type=str, required=True, help='Customer ID is required')
+account_args.add_argument('account_type', type=str, required=True, help='Account type is required')
+account_args.add_argument('balance', type=float)
+
+loan_args = reqparse.RequestParser()
+loan_args.add_argument('customer_id', type=str, required=True, help='Customer ID is required')
+loan_args.add_argument('loan_type', type=str, required=True, help='Loan type is required')
+loan_args.add_argument('principal_amount', type=float, required=True, help='Principal amount is required')
+loan_args.add_argument('interest_rate', type=float)
+loan_args.add_argument('start_date', type=str, required=True, help='Start date is required')
+loan_args.add_argument('end_date', type=str, required=True, help='End date is required')
+loan_args.add_argument('status', type=str)
+
+loan_payment_args = reqparse.RequestParser()
+loan_payment_args.add_argument('loan_id', type=str, required=True, help='Loan ID is required')
+loan_payment_args.add_argument('payment_date', type=str)
+loan_payment_args.add_argument('payment_amount', type=float, required=True, help='Payment amount is required')
+loan_payment_args.add_argument('remaining_balance', type=float, required=True, help='Remaining balance is required')
+
+employee_args = reqparse.RequestParser()
+employee_args.add_argument('branch_id', type=str, required=True, help='Branch ID is required')
+employee_args.add_argument('first_name', type=str, required=True, help='First name is required')
+employee_args.add_argument('last_name', type=str, required=True, help='Last name is required')
+employee_args.add_argument('position', type=str, required=True, help='Position is required')
+employee_args.add_argument('phone_number', type=str, required=True, help='Phone number is required')
+employee_args.add_argument('email', type=str, required=True, help='Email is required')
+
+card_args = reqparse.RequestParser()
+card_args.add_argument('account_id', type=str, required=True, help='Account ID is required')
+card_args.add_argument('card_type', type=str, required=True, help='Card type is required')
+card_args.add_argument('card_number', type=str, required=True, help='Card number is required')
+card_args.add_argument('expiration_date', type=str, required=True, help='Expiration date is required')
+card_args.add_argument('cvv', type=str, required=True, help='CVV is required')
+card_args.add_argument('status', type=str)
+
+transaction_args = reqparse.RequestParser()
+transaction_args.add_argument('from_account_id', type=str, required=True, help='From account ID is required')
+transaction_args.add_argument('to_account_id', type=str)
+transaction_args.add_argument('transaction_type', type=str, required=True, help='Transaction type is required')
+transaction_args.add_argument('amount', type=float, required=True, help='Amount is required')
+
+customer_support_args = reqparse.RequestParser()
+customer_support_args.add_argument('customer_id', type=str, required=True, help='Customer ID is required')
+customer_support_args.add_argument('issue_description', type=str, required=True, help='Issue description is required')
+customer_support_args.add_argument('status', type=str)
+customer_support_args.add_argument('resolution_details', type=str)
+customer_support_args.add_argument('resolved_date', type=str)
+
+credit_score_args = reqparse.RequestParser()
+credit_score_args.add_argument('customer_id', type=str, required=True, help='Customer ID is required')
+credit_score_args.add_argument('score', type=float, required=True, help='Credit score is required')
+credit_score_args.add_argument('risk_category', type=str, required=True, help='Risk category is required')
+credit_score_args.add_argument('computed_by_system', type=bool, required=True, help='Computed by system is required')
 
 @app.route('/')
 def home():
