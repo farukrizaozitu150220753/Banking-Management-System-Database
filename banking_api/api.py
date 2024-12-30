@@ -27,9 +27,9 @@ class Branch(db.Model):
     phone_number = db.Column(db.String(15), unique=True, nullable=False)
 
     # Relationships
-    customers = db.relationship('Customer', backref='branch', lazy=True)
-    employees = db.relationship('Employee', backref='branch', lazy=True)
-
+    customers = db.relationship('Customer', backref='branch', cascade='all, delete-orphan')
+    employees = db.relationship('Employee', backref='branch', cascade='all, delete-restrict')
+    
     def __repr__(self):
         return f"Branch(branch_id = {self.branch_id}, branch_name = {self.branch_name}, address_line1 = {self.address_line1}, address_line2 = {self.address_line2}, city = {self.city}, state = {self.state}, zip_code = {self.zip_code}, phone_number = {self.phone_number})"
 
@@ -47,13 +47,13 @@ class Customer(db.Model):
     city = db.Column(db.String(100), nullable=False)
     state = db.Column(db.String(100), nullable=False)
     zip_code = db.Column(db.String(20), nullable=False)
-    branch_id = db.Column(BINARY(16), db.ForeignKey('branch.branch_id'), nullable=False)
+    branch_id = db.Column(BINARY(16), db.ForeignKey('branch.branch_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
 
     # Relationships
-    accounts = db.relationship('Account', backref='customer', lazy=True)
-    loans = db.relationship('Loan', backref='customer', lazy=True)
-    support_tickets = db.relationship('CustomerSupport', backref='customer', lazy=True)
-    credit_score = db.relationship('CreditScore', backref='customer', uselist=False, lazy=True)
+    accounts = db.relationship('Account', backref='customer', cascade='all, delete-restrict')
+    loans = db.relationship('Loan', backref='customer', cascade='all, delete-restrict')
+    support_tickets = db.relationship('CustomerSupport', backref='customer', cascade='all, delete-restrict')
+    credit_score = db.relationship('CreditScore', backref='customer', uselist=False, cascade='all, delete-restrict')
 
     def __repr__(self):
         return f"Customer(customer_id = {self.customer_id}, first_name = {self.first_name}, last_name = {self.last_name}, date_of_birth = {self.date_of_birth}, phone_number = {self.phone_number}, email = {self.email}, address_line1 = {self.address_line1}, address_line2 = {self.address_line2}, city = {self.city}, state = {self.state}, zip_code = {self.zip_code}, branch_id = {self.branch_id})"
@@ -62,19 +62,14 @@ class Account(db.Model):
     __tablename__ = 'account'
     
     account_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
-    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id'), nullable=False)
+    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
     account_type = db.Column(db.Enum('CHECKING', 'SAVINGS'), nullable=False)
-    balance = db.Column(db.Numeric(15, 2), nullable=False, default=0.00)
+    balance = db.Column(db.DECIMAL(15,2), nullable=False, default=0.00)
     creation_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
-    # Relationships
-    cards = db.relationship('Card', backref='account', lazy=True)
-    outgoing_transactions = db.relationship('Transaction', 
-                                         foreign_keys='Transaction.from_account_id',
-                                         backref='from_account', lazy=True)
-    incoming_transactions = db.relationship('Transaction',
-                                         foreign_keys='Transaction.to_account_id',
-                                         backref='to_account', lazy=True)
+    cards = db.relationship('Card', backref='account', cascade='all, delete-restrict')
+    outgoing_transactions = db.relationship('Transaction', foreign_keys='Transaction.from_account_id', backref='from_account', cascade='all, delete-restrict')
+    incoming_transactions = db.relationship('Transaction', foreign_keys='Transaction.to_account_id', backref='to_account', cascade='all, delete-set-null')
 
     __table_args__ = (
         db.CheckConstraint('balance >= 0', name='check_balance_positive'),
@@ -87,16 +82,15 @@ class Loan(db.Model):
     __tablename__ = 'loan'
     
     loan_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
-    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id'), nullable=False)
+    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
     loan_type = db.Column(db.Enum('HOME', 'AUTO', 'PERSONAL'), nullable=False)
-    principal_amount = db.Column(db.Numeric(15, 2), nullable=False)
-    interest_rate = db.Column(db.Numeric(5, 2), nullable=False, default=0.00)
+    principal_amount = db.Column(db.DECIMAL(15,2), nullable=False)
+    interest_rate = db.Column(db.DECIMAL(5,2), nullable=False, default=0.00)
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
     status = db.Column(db.Enum('ACTIVE', 'PAID_OFF', 'DEFAULT'), nullable=False, default='ACTIVE')
 
-    # Relationships
-    payments = db.relationship('LoanPayment', backref='loan', lazy=True)
+    payments = db.relationship('LoanPayment', backref='loan', cascade='all, delete-restrict')
 
     __table_args__ = (
         db.CheckConstraint('principal_amount > 0', name='check_principal_positive'),
@@ -111,10 +105,10 @@ class LoanPayment(db.Model):
     __tablename__ = 'loan_payment'
     
     loan_payment_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
-    loan_id = db.Column(BINARY(16), db.ForeignKey('loan.loan_id'), nullable=False)
+    loan_id = db.Column(BINARY(16), db.ForeignKey('loan.loan_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
     payment_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    payment_amount = db.Column(db.Numeric(15, 2), nullable=False)
-    remaining_balance = db.Column(db.Numeric(15, 2), nullable=False)
+    payment_amount = db.Column(db.DECIMAL(15,2), nullable=False)
+    remaining_balance = db.Column(db.DECIMAL(15,2), nullable=False)
 
     __table_args__ = (
         db.CheckConstraint('payment_amount > 0', name='check_payment_positive'),
@@ -128,7 +122,7 @@ class Employee(db.Model):
     __tablename__ = 'employee'
     
     employee_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
-    branch_id = db.Column(BINARY(16), db.ForeignKey('branch.branch_id'), nullable=False)
+    branch_id = db.Column(BINARY(16), db.ForeignKey('branch.branch_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
     first_name = db.Column(db.String(100), nullable=False)
     last_name = db.Column(db.String(100), nullable=False)
     position = db.Column(db.String(100), nullable=False)
@@ -143,7 +137,7 @@ class Card(db.Model):
     __tablename__ = 'card'
     
     card_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
-    account_id = db.Column(BINARY(16), db.ForeignKey('account.account_id'), nullable=False)
+    account_id = db.Column(BINARY(16), db.ForeignKey('account.account_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
     card_type = db.Column(db.Enum('DEBIT', 'CREDIT'), nullable=False)
     card_number = db.Column(db.String(16), unique=True, nullable=False)
     expiration_date = db.Column(db.Date, nullable=False)
@@ -157,10 +151,10 @@ class Transaction(db.Model):
     __tablename__ = 'transaction'
     
     transaction_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
-    from_account_id = db.Column(BINARY(16), db.ForeignKey('account.account_id'), nullable=False)
-    to_account_id = db.Column(BINARY(16), db.ForeignKey('account.account_id'), nullable=True)
+    from_account_id = db.Column(BINARY(16), db.ForeignKey('account.account_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
+    to_account_id = db.Column(BINARY(16), db.ForeignKey('account.account_id', onupdate='CASCADE', ondelete='SET NULL'))
     transaction_type = db.Column(db.Enum('DEPOSIT', 'WITHDRAWAL', 'TRANSFER'), nullable=False)
-    amount = db.Column(db.Numeric(15, 2), nullable=False)
+    amount = db.Column(db.DECIMAL(15,2), nullable=False)
     transaction_timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -174,10 +168,10 @@ class CustomerSupport(db.Model):
     __tablename__ = 'customer_support'
     
     ticket_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
-    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id'), nullable=False)
+    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
     issue_description = db.Column(db.Text, nullable=False)
     status = db.Column(db.Enum('OPEN', 'IN_PROGRESS', 'RESOLVED'), nullable=False, default='OPEN')
-    resolution_details = db.Column(db.Text, nullable=True)
+    resolution_details = db.Column(db.Text)
     created_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     resolved_date = db.Column(db.DateTime)
         
@@ -188,8 +182,8 @@ class CreditScore(db.Model):
     __tablename__ = 'credit_score'
     
     credit_score_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
-    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id'), nullable=False)
-    score = db.Column(db.Numeric(5, 2), nullable=False)
+    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
+    score = db.Column(db.DECIMAL(5,2), nullable=False)
     risk_category = db.Column(db.String(50), nullable=False)
     computed_by_system = db.Column(db.Boolean)
 
@@ -199,6 +193,20 @@ class CreditScore(db.Model):
         
     def __repr__(self):
         return f"CreditScore(credit_score_id = {self.credit_score_id}, customer_id = {self.customer_id}, score = {self.score}, risk_category = {self.risk_category}, computed_by_system = {self.computed_by_system})"
+
+def validate_uuid(value):
+    try:
+        uuid.UUID(value)
+        return value
+    except ValueError:
+        raise ValueError('Invalid UUID format')
+
+def validate_enum(allowed_values):
+    def validate(value):
+        if value not in allowed_values:
+            raise ValueError(f'Value must be one of {allowed_values}')
+        return value
+    return validate
 
 branch_args = reqparse.RequestParser()
 branch_args.add_argument('branch_name', type=str, required=True, help='Branch name is required')
@@ -223,9 +231,9 @@ customer_args.add_argument('zip_code', type=str, required=True, help='Zip code i
 customer_args.add_argument('branch_id', type=str, required=True, help='Branch ID is required')
 
 account_args = reqparse.RequestParser()
-account_args.add_argument('customer_id', type=str, required=True, help='Customer ID is required')
-account_args.add_argument('account_type', type=str, required=True, help='Account type is required')
-account_args.add_argument('balance', type=float)
+account_args.add_argument('customer_id', type=validate_uuid, required=True, help='Valid Customer UUID is required')
+account_args.add_argument('account_type', type=validate_enum(['CHECKING', 'SAVINGS']), required=True, help='Account type must be CHECKING or SAVINGS')
+account_args.add_argument('balance', type=float, help='Balance must be >= 0', default=0.00)
 
 loan_args = reqparse.RequestParser()
 loan_args.add_argument('customer_id', type=str, required=True, help='Customer ID is required')
