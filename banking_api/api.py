@@ -83,7 +83,6 @@ class Account(db.Model):
     def __repr__(self):
         return f"Account(account_id = {self.account_id}, customer_id = {self.customer_id}, account_type = {self.account_type}, balance = {self.balance}, creation_date = {self.creation_date})"
 
-
 class Loan(db.Model):
     __tablename__ = 'loan'
     
@@ -400,7 +399,7 @@ class BranchResourceAll(Resource):
         db.session.add(branch)
         db.session.commit()
         branches = Branch.query.all()
-        return branches
+        return branches, 201
 
 class BranchResource(Resource):
     @marshal_with(branch_fields)
@@ -425,7 +424,484 @@ class BranchResource(Resource):
         branch.phone_number = args['phone_number']
         db.session.commit()
         return branch
+    
+    def delete(self, branch_id):
+        branch = Branch.query.filter_by(branch_id=branch_id).first()
+        if not branch:
+            abort(404, message='Branch not found')
+        db.session.delete(branch)
+        db.session.commit()
+        return {'message': f'Branch {branch_id} deleted successfully'}, 200
 
+class CustomerResourceAll(Resource):
+    @marshal_with(customer_fields)
+    def get(self):
+        customers = Customer.query.all()
+        return customers
+    
+    @marshal_with(customer_fields)
+    def post(self):
+        args = customer_args.parse_args()
+        customer = Customer(
+            first_name=args['first_name'], 
+            last_name=args['last_name'], 
+            date_of_birth=args['date_of_birth'], 
+            phone_number=args['phone_number'], 
+            email=args['email'], 
+            address_line1=args['address_line1'], 
+            address_line2=args['address_line2'], 
+            city=args['city'], 
+            state=args['state'], 
+            zip_code=args['zip_code'], 
+            branch_id=args['branch_id']
+        )
+        db.session.add(customer)
+        db.session.commit()
+        customers = Customer.query.all()
+        return customers, 201
+
+class CustomerResource(Resource):
+    @marshal_with(customer_fields)
+    def get(self, customer_id):
+        customer = Customer.query.filter_by(customer_id=customer_id).first()
+        if not customer:
+            abort(404, message='Customer not found')
+        return customer
+    
+    @marshal_with(customer_fields)
+    def put(self, customer_id):
+        args = customer_args.parse_args()
+        customer = Customer.query.filter_by(customer_id=customer_id).first()
+        if not customer:
+            abort(404, message='Customer not found')
+        customer.first_name = args['first_name']
+        customer.last_name = args['last_name']
+        customer.date_of_birth = args['date_of_birth']
+        customer.phone_number = args['phone_number']
+        customer.email = args['email']
+        customer.address_line1 = args['address_line1']
+        customer.address_line2 = args['address_line2']
+        customer.city = args['city']
+        customer.state = args['state']
+        customer.zip_code = args['zip_code']
+        customer.branch_id = args['branch_id']
+        db.session.commit()
+        return customer
+    
+    def delete(self, customer_id):
+        customer = Customer.query.filter_by(customer_id=customer_id).first()
+        if not customer:
+            abort(404, message='Customer not found')
+        db.session.delete(customer)
+        db.session.commit()
+        return {'message': f'Customer {customer_id} deleted successfully'}, 200
+
+class AccountResourceAll(Resource):
+    @marshal_with(account_fields)
+    def get(self):
+        accounts = Account.query.all()
+        return accounts
+    
+    @marshal_with(account_fields)
+    def post(self):
+        args = account_args.parse_args()
+        account = Account(
+            customer_id=args['customer_id'], 
+            account_type=args['account_type'], 
+            balance=args['balance']
+        )
+        db.session.add(account)
+        db.session.commit()
+        accounts = Account.query.all()
+        return accounts, 201
+
+class AccountResource(Resource):
+    @marshal_with(account_fields)
+    def get(self, account_id):
+        account = Account.query.filter_by(account_id=account_id).first()
+        if not account:
+            abort(404, message='Account not found')
+        return account
+    
+    @marshal_with(account_fields)
+    def put(self, account_id):
+        args = account_args.parse_args()
+        account = Account.query.filter_by(account_id=account_id).first()
+        if not account:
+            abort(404, message='Account not found')
+        account.customer_id = args['customer_id']
+        account.account_type = args['account_type']
+        account.balance = args['balance']
+        db.session.commit()
+        return account
+    
+    def delete(self, account_id):
+        account = Account.query.filter_by(account_id=account_id).first()
+        if not account:
+            abort(404, message='Account not found')
+        db.session.delete(account)
+        db.session.commit()
+        return {'message': f'Account {account_id} deleted successfully'}, 200
+
+class LoanResourceAll(Resource):
+    @marshal_with(loan_fields)
+    def get(self):
+        loans = Loan.query.all()
+        return loans
+    
+    @marshal_with(loan_fields)
+    def post(self):
+        args = loan_args.parse_args()
+        loan = Loan(
+            customer_id=args['customer_id'], 
+            loan_type=args['loan_type'], 
+            principal_amount=args['principal_amount'], 
+            interest_rate=args['interest_rate'], 
+            start_date=args['start_date'], 
+            end_date=args['end_date'], 
+            status=args['status']
+        )
+        db.session.add(loan)
+        db.session.commit()
+        loans = Loan.query.all()
+        return loans, 201
+    
+class LoanResource(Resource):
+    @marshal_with(loan_fields)
+    def get(self, loan_id):
+        loan = Loan.query.filter_by(loan_id=loan_id).first()
+        if not loan:
+            abort(404, message='Loan not found')
+        return loan
+    
+    @marshal_with(loan_fields)
+    def put(self, loan_id):
+        args = loan_args.parse_args()
+        loan = Loan.query.filter_by(loan_id=loan_id).first()
+        if not loan:
+            abort(404, message='Loan not found')
+        loan.customer_id = args['customer_id']
+        loan.loan_type = args['loan_type']
+        loan.principal_amount = args['principal_amount']
+        loan.interest_rate = args['interest_rate']
+        loan.start_date = args['start_date']
+        loan.end_date = args['end_date']
+        loan.status = args['status']
+        db.session.commit()
+        return loan
+    
+    def delete(self, loan_id):
+        loan = Loan.query.filter_by(loan_id=loan_id).first()
+        if not loan:
+            abort(404, message='Loan not found')
+        db.session.delete(loan)
+        db.session.commit()
+        return {'message': f'Loan {loan_id} deleted successfully'}, 200
+
+class LoanPaymentResourceAll(Resource):
+    @marshal_with(loan_payment_fields)
+    def get(self):
+        loan_payments = LoanPayment.query.all()
+        return loan_payments
+    
+    @marshal_with(loan_payment_fields)
+    def post(self):
+        args = loan_payment_args.parse_args()
+        loan_payment = LoanPayment(
+            loan_id=args['loan_id'], 
+            payment_date=args['payment_date'], 
+            payment_amount=args['payment_amount'], 
+            remaining_balance=args['remaining_balance']
+        )
+        db.session.add(loan_payment)
+        db.session.commit()
+        loan_payments = LoanPayment.query.all()
+        return loan_payments, 201
+    
+class LoanPaymentResource(Resource):
+    @marshal_with(loan_payment_fields)
+    def get(self, loan_payment_id):
+        loan_payment = LoanPayment.query.filter_by(loan_payment_id=loan_payment_id).first()
+        if not loan_payment:
+            abort(404, message='Loan payment not found')
+        return loan_payment
+    
+    @marshal_with(loan_payment_fields)
+    def put(self, loan_payment_id):
+        args = loan_payment_args.parse_args()
+        loan_payment = LoanPayment.query.filter_by(loan_payment_id=loan_payment_id).first()
+        if not loan_payment:
+            abort(404, message='Loan payment not found')
+        loan_payment.loan_id = args['loan_id']
+        loan_payment.payment_date = args['payment_date']
+        loan_payment.payment_amount = args['payment_amount']
+        loan_payment.remaining_balance = args['remaining_balance']
+        db.session.commit()
+        return loan_payment
+    
+    def delete(self, loan_payment_id):
+        loan_payment = LoanPayment.query.filter_by(loan_payment_id=loan_payment_id).first()
+        if not loan_payment:
+            abort(404, message='Loan payment not found')
+        db.session.delete(loan_payment)
+        db.session.commit()
+        return {'message': f'Loan payment {loan_payment_id} deleted successfully'}, 200
+    
+class EmployeeResourceAll(Resource):
+    @marshal_with(employee_fields)
+    def get(self):
+        employees = Employee.query.all()
+        return employees
+    
+    @marshal_with(employee_fields)
+    def post(self):
+        args = employee_args.parse_args()
+        employee = Employee(
+            branch_id=args['branch_id'], 
+            first_name=args['first_name'], 
+            last_name=args['last_name'], 
+            position=args['position'], 
+            phone_number=args['phone_number'], 
+            email=args['email']
+        )
+        db.session.add(employee)
+        db.session.commit()
+        employees = Employee.query.all()
+        return employees, 201
+
+class EmployeeResource(Resource):
+    @marshal_with(employee_fields)
+    def get(self, employee_id):
+        employee = Employee.query.filter_by(employee_id=employee_id).first()
+        if not employee:
+            abort(404, message='Employee not found')
+        return employee
+    
+    @marshal_with(employee_fields)
+    def put(self, employee_id):
+        args = employee_args.parse_args()
+        employee = Employee.query.filter_by(employee_id=employee_id).first()
+        if not employee:
+            abort(404, message='Employee not found')
+        employee.branch_id = args['branch_id']
+        employee.first_name = args['first_name']
+        employee.last_name = args['last_name']
+        employee.position = args['position']
+        employee.phone_number = args['phone_number']
+        employee.email = args['email']
+        db.session.commit()
+        return employee
+    
+    def delete(self, employee_id):
+        employee = Employee.query.filter_by(employee_id=employee_id).first()
+        if not employee:
+            abort(404, message='Employee not found')
+        db.session.delete(employee)
+        db.session.commit()
+        return {'message': f'Employee {employee_id} deleted successfully'}, 200
+    
+class CardResourceAll(Resource):
+    @marshal_with(card_fields)
+    def get(self):
+        cards = Card.query.all()
+        return cards
+    
+    @marshal_with(card_fields)
+    def post(self):
+        args = card_args.parse_args()
+        card = Card(
+            account_id=args['account_id'], 
+            card_type=args['card_type'], 
+            card_number=args['card_number'], 
+            expiration_date=args['expiration_date'], 
+            cvv=args['cvv'], 
+            status=args['status']
+        )
+        db.session.add(card)
+        db.session.commit()
+        cards = Card.query.all()
+        return cards, 201
+    
+class CardResource(Resource):
+    @marshal_with(card_fields)
+    def get(self, card_id):
+        card = Card.query.filter_by(card_id=card_id).first()
+        if not card:
+            abort(404, message='Card not found')
+        return card
+    
+    @marshal_with(card_fields)
+    def put(self, card_id):
+        args = card_args.parse_args()
+        card = Card.query.filter_by(card_id=card_id).first()
+        if not card:
+            abort(404, message='Card not found')
+        card.account_id = args['account_id']
+        card.card_type = args['card_type']
+        card.card_number = args['card_number']
+        card.expiration_date = args['expiration_date']
+        card.cvv = args['cvv']
+        card.status = args['status']
+        db.session.commit()
+        return card
+    
+    def delete(self, card_id):
+        card = Card.query.filter_by(card_id=card_id).first()
+        if not card:
+            abort(404, message='Card not found')
+        db.session.delete(card)
+        db.session.commit()
+        return {'message': f'Card {card_id} deleted successfully'}, 200
+    
+class TransactionResourceAll(Resource):
+    @marshal_with(transaction_fields)
+    def get(self):
+        transactions = Transaction.query.all()
+        return transactions
+    
+    @marshal_with(transaction_fields)
+    def post(self):
+        args = transaction_args.parse_args()
+        transaction = Transaction(
+            from_account_id=args['from_account_id'], 
+            to_account_id=args['to_account_id'], 
+            transaction_type=args['transaction_type'], 
+            amount=args['amount']
+        )
+        db.session.add(transaction)
+        db.session.commit()
+        transactions = Transaction.query.all()
+        return transactions, 201
+    
+class TransactionsResource(Resource):
+    @marshal_with(transaction_fields)
+    def get(self, transaction_id):
+        transaction = Transaction.query.filter_by(transaction_id=transaction_id).first()
+        if not transaction:
+            abort(404, message='Transaction not found')
+        return transaction
+    
+    @marshal_with(transaction_fields)
+    def put(self, transaction_id):
+        args = transaction_args.parse_args()
+        transaction = Transaction.query.filter_by(transaction_id=transaction_id).first()
+        if not transaction:
+            abort(404, message='Transaction not found')
+        transaction.from_account_id = args['from_account_id']
+        transaction.to_account_id = args['to_account_id']
+        transaction.transaction_type = args['transaction_type']
+        transaction.amount = args['amount']
+        db.session.commit()
+        return transaction
+    
+    def delete(self, transaction_id):
+        transaction = Transaction.query.filter_by(transaction_id=transaction_id).first()
+        if not transaction:
+            abort(404, message='Transaction not found')
+        db.session.delete(transaction)
+        db.session.commit()
+        return {'message': f'Transaction {transaction_id} deleted successfully'}, 200
+    
+class CustomerSupportResourceAll(Resource):
+    @marshal_with(customer_support_fields)
+    def get(self):
+        customer_supports = CustomerSupport.query.all()
+        return customer_supports
+    
+    @marshal_with(customer_support_fields)
+    def post(self):
+        args = customer_support_args.parse_args()
+        customer_support = CustomerSupport(
+            customer_id=args['customer_id'], 
+            issue_description=args['issue_description'], 
+            status=args['status'], 
+            resolution_details=args['resolution_details'], 
+            resolved_date=args['resolved_date']
+        )
+        db.session.add(customer_support)
+        db.session.commit()
+        customer_supports = CustomerSupport.query.all()
+        return customer_supports, 201
+    
+class CustomerSupportResource(Resource):
+    @marshal_with(customer_support_fields)
+    def get(self, ticket_id):
+        customer_support = CustomerSupport.query.filter_by(ticket_id=ticket_id).first()
+        if not customer_support:
+            abort(404, message='Customer support ticket not found')
+        return customer_support
+    
+    @marshal_with(customer_support_fields)
+    def put(self, ticket_id):
+        args = customer_support_args.parse_args()
+        customer_support = CustomerSupport.query.filter_by(ticket_id=ticket_id).first()
+        if not customer_support:
+            abort(404, message='Customer support ticket not found')
+        customer_support.customer_id = args['customer_id']
+        customer_support.issue_description = args['issue_description']
+        customer_support.status = args['status']
+        customer_support.resolution_details = args['resolution_details']
+        customer_support.resolved_date = args['resolved_date']
+        db.session.commit()
+        return customer_support
+    
+    def delete(self, ticket_id):
+        customer_support = CustomerSupport.query.filter_by(ticket_id=ticket_id).first()
+        if not customer_support:
+            abort(404, message='Customer support ticket not found')
+        db.session.delete(customer_support)
+        db.session.commit()
+        return {'message': f'Customer support ticket {ticket_id} deleted successfully'}, 200
+    
+class CreditScoreResourceAll(Resource):
+    @marshal_with(credit_score_fields)
+    def get(self):
+        credit_scores = CreditScore.query.all()
+        return credit_scores
+    
+    @marshal_with(credit_score_fields)
+    def post(self):
+        args = credit_score_args.parse_args()
+        credit_score = CreditScore(
+            customer_id=args['customer_id'], 
+            score=args['score'], 
+            risk_category=args['risk_category'], 
+            computed_by_system=args['computed_by_system']
+        )
+        db.session.add(credit_score)
+        db.session.commit()
+        credit_scores = CreditScore.query.all()
+        return credit_scores, 201
+    
+class CreditScoreResource(Resource):
+    @marshal_with(credit_score_fields)
+    def get(self, credit_score_id):
+        credit_score = CreditScore.query.filter_by(credit_score_id=credit_score_id).first()
+        if not credit_score:
+            abort(404, message='Credit score not found')
+        return credit_score
+    
+    @marshal_with(credit_score_fields)
+    def put(self, credit_score_id):
+        args = credit_score_args.parse_args()
+        credit_score = CreditScore.query.filter_by(credit_score_id=credit_score_id).first()
+        if not credit_score:
+            abort(404, message='Credit score not found')
+        credit_score.customer_id = args['customer_id']
+        credit_score.score = args['score']
+        credit_score.risk_category = args['risk_category']
+        credit_score.computed_by_system = args['computed_by_system']
+        db.session.commit()
+        return credit_score
+    
+    def delete(self, credit_score_id):
+        credit_score = CreditScore.query.filter_by(credit_score_id=credit_score_id).first()
+        if not credit_score:
+            abort(404, message='Credit score not found')
+        db.session.delete(credit_score)
+        db.session.commit()
+        return {'message': f'Credit score {credit_score_id} deleted successfully'}, 200
+    
 @app.route('/')
 def home():
     return '<h1>Welcome to the Banking API!</h1>'
