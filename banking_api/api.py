@@ -379,6 +379,53 @@ credit_score_fields = {
     'computed_by_system': fields.Boolean,
 }
 
+class BranchResourceAll(Resource):
+    @marshal_with(branch_fields)
+    def get(self):
+        branch = Branch.query.all()
+        return branch
+
+    @marshal_with(branch_fields)
+    def post(self):
+        args = branch_args.parse_args()
+        branch = Branch(
+            branch_name=args['branch_name'], 
+            address_line1=args['address_line1'], 
+            address_line2=args['address_line2'], 
+            city=args['city'], 
+            state=args['state'], 
+            zip_code=args['zip_code'], 
+            phone_number=args['phone_number']
+        )
+        db.session.add(branch)
+        db.session.commit()
+        branches = Branch.query.all()
+        return branches
+
+class BranchResource(Resource):
+    @marshal_with(branch_fields)
+    def get(self, branch_id):
+        branch = Branch.query.filter_by(branch_id=branch_id).first()
+        if not branch:
+            abort(404, message='Branch not found')
+        return branch
+    
+    @marshal_with(branch_fields)
+    def put(self, branch_id):
+        args = branch_args.parse_args()
+        branch = Branch.query.filter_by(branch_id=branch_id).first()
+        if not branch:
+            abort(404, message='Branch not found')
+        branch.branch_name = args['branch_name']
+        branch.address_line1 = args['address_line1']
+        branch.address_line2 = args['address_line2']
+        branch.city = args['city']
+        branch.state = args['state']
+        branch.zip_code = args['zip_code']
+        branch.phone_number = args['phone_number']
+        db.session.commit()
+        return branch
+
 @app.route('/')
 def home():
     return '<h1>Welcome to the Banking API!</h1>'
