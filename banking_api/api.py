@@ -773,7 +773,7 @@ class TransactionResourceAll(Resource):
         transactions = Transaction.query.all()
         return transactions, 201
     
-class TransactionsResource(Resource):
+class TransactionResource(Resource):
     @marshal_with(transaction_fields)
     def get(self, transaction_id):
         transaction = Transaction.query.filter_by(transaction_id=transaction_id).first()
@@ -902,6 +902,32 @@ class CreditScoreResource(Resource):
         db.session.commit()
         return {'message': f'Credit score {credit_score_id} deleted successfully'}, 200
     
+resources = [
+    (BranchResourceAll, '/api/branche/'),
+    (BranchResource, '/api/branche/<int:branch_id>'),
+    (CustomerResourceAll, '/api/customer/'),
+    (CustomerResource, '/api/customer/<int:customer_id>'),
+    (AccountResourceAll, '/api/account/'),
+    (AccountResource, '/api/account/<int:account_id>'),
+    (LoanResourceAll, '/api/loan/'),
+    (LoanResource, '/api/loan/<int:loan_id>'),
+    (LoanPaymentResourceAll, '/api/loanpayment/'),
+    (LoanPaymentResource, '/api/loanpayment/<int:loan_payment_id>'),
+    (EmployeeResourceAll, '/api/employee/'),
+    (EmployeeResource, '/api/employee/<int:employee_id>'),
+    (CardResourceAll, '/api/card/'),
+    (CardResource, '/api/card/<int:card_id>')
+    (TransactionResourceAll, '/api/transaction/'),
+    (TransactionResource, '/api/transaction/<int:transaction_id>'),
+    (CustomerSupportResourceAll, '/api/customersupport/'),
+    (CustomerSupportResource, '/api/customersupport/<int:ticket_id>'),
+    (CreditScoreResourceAll, '/api/creditscore/'),
+    (CreditScoreResource, '/api/creditscore/<int:credit_score_id>')
+]
+
+for resource, route in resources:
+    api.add_resource(resource, route)
+
 @app.route('/')
 def home():
     return '<h1>Welcome to the Banking API!</h1>'
