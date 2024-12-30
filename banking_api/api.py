@@ -911,8 +911,8 @@ class CreditScoreResource(Resource):
         return {'message': f'Credit score {credit_score_id} deleted successfully'}, 200
     
 resources = [
-    (BranchResourceAll, '/api/branche/'),
-    (BranchResource, '/api/branche/<int:branch_id>'),
+    (BranchResourceAll, '/api/branch/'),
+    (BranchResource, '/api/branch/<int:branch_id>'),
     (CustomerResourceAll, '/api/customer/'),
     (CustomerResource, '/api/customer/<int:customer_id>'),
     (AccountResourceAll, '/api/account/'),
@@ -924,7 +924,7 @@ resources = [
     (EmployeeResourceAll, '/api/employee/'),
     (EmployeeResource, '/api/employee/<int:employee_id>'),
     (CardResourceAll, '/api/card/'),
-    (CardResource, '/api/card/<int:card_id>')
+    (CardResource, '/api/card/<int:card_id>'),
     (TransactionResourceAll, '/api/transaction/'),
     (TransactionResource, '/api/transaction/<int:transaction_id>'),
     (CustomerSupportResourceAll, '/api/customersupport/'),
