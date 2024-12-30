@@ -28,7 +28,7 @@ class Branch(db.Model):
 
     # Relationships
     customers = db.relationship('Customer', backref='branch', cascade='all, delete-orphan')
-    employees = db.relationship('Employee', backref='branch', cascade='all, delete-restrict')
+    employees = db.relationship('Employee', backref='branch', cascade='all, delete-orphan')
     
     def __repr__(self):
         return f"Branch(branch_id = {self.branch_id}, branch_name = {self.branch_name}, address_line1 = {self.address_line1}, address_line2 = {self.address_line2}, city = {self.city}, state = {self.state}, zip_code = {self.zip_code}, phone_number = {self.phone_number})"
@@ -50,10 +50,10 @@ class Customer(db.Model):
     branch_id = db.Column(BINARY(16), db.ForeignKey('branch.branch_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
 
     # Relationships
-    accounts = db.relationship('Account', backref='customer', cascade='all, delete-restrict')
-    loans = db.relationship('Loan', backref='customer', cascade='all, delete-restrict')
-    support_tickets = db.relationship('CustomerSupport', backref='customer', cascade='all, delete-restrict')
-    credit_score = db.relationship('CreditScore', backref='customer', uselist=False, cascade='all, delete-restrict')
+    accounts = db.relationship('Account', backref='customer', cascade='all, delete-orphan')
+    loans = db.relationship('Loan', backref='customer', cascade='all, delete-orphan')
+    support_tickets = db.relationship('CustomerSupport', backref='customer', cascade='all, delete-orphan')
+    credit_score = db.relationship('CreditScore', backref='customer', uselist=False, cascade='all, delete-orphan')
 
     def __repr__(self):
         return f"Customer(customer_id = {self.customer_id}, first_name = {self.first_name}, last_name = {self.last_name}, date_of_birth = {self.date_of_birth}, phone_number = {self.phone_number}, email = {self.email}, address_line1 = {self.address_line1}, address_line2 = {self.address_line2}, city = {self.city}, state = {self.state}, zip_code = {self.zip_code}, branch_id = {self.branch_id})"
@@ -67,9 +67,9 @@ class Account(db.Model):
     balance = db.Column(db.DECIMAL(15,2), nullable=False, default=0.00)
     creation_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
-    cards = db.relationship('Card', backref='account', cascade='all, delete-restrict')
-    outgoing_transactions = db.relationship('Transaction', foreign_keys='Transaction.from_account_id', backref='from_account', cascade='all, delete-restrict')
-    incoming_transactions = db.relationship('Transaction', foreign_keys='Transaction.to_account_id', backref='to_account', cascade='all, delete-set-null')
+    cards = db.relationship('Card', backref='account', cascade='all, delete-orphan')
+    outgoing_transactions = db.relationship('Transaction', foreign_keys='Transaction.from_account_id', backref='from_account', cascade='all, delete-orphan')
+    incoming_transactions = db.relationship('Transaction', foreign_keys='Transaction.to_account_id', backref='to_account', cascade='all, delete-orphan')
 
     __table_args__ = (
         db.CheckConstraint('balance >= 0', name='check_balance_positive'),
@@ -90,7 +90,7 @@ class Loan(db.Model):
     end_date = db.Column(db.Date, nullable=False)
     status = db.Column(db.Enum('ACTIVE', 'PAID_OFF', 'DEFAULT'), nullable=False, default='ACTIVE')
 
-    payments = db.relationship('LoanPayment', backref='loan', cascade='all, delete-restrict')
+    payments = db.relationship('LoanPayment', backref='loan', cascade='all, delete-orphan')
 
     __table_args__ = (
         db.CheckConstraint('principal_amount > 0', name='check_principal_positive'),
