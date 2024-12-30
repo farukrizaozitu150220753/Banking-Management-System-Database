@@ -2,8 +2,8 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import uuid
+from sqlalchemy import text
 from sqlalchemy.dialects.mysql import BINARY
-from sqlalchemy.ext.hybrid import hybrid_property
 from flask_restful import Resource, Api, reqparse, fields, marshal_with, abort
 
 app = Flask(__name__)
@@ -18,11 +18,10 @@ class Branch(db.Model):
     __tablename__ = 'branch'
     
     branch_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
-    branch_name = db.Column(db.String(255), unique=True, nullable=False)
-    address_line1 = db.Column(db.String(255), nullable=False)
-    address_line2 = db.Column(db.String(255))
+    branch_name = db.Column(db.String(100), unique=True, nullable=False)
+    address_line1 = db.Column(db.String(100), nullable=False)
+    address_line2 = db.Column(db.String(100))
     city = db.Column(db.String(100), nullable=False)
-    state = db.Column(db.String(100), nullable=False)
     zip_code = db.Column(db.String(20), nullable=False)
     phone_number = db.Column(db.String(15), unique=True, nullable=False)
 
@@ -31,7 +30,7 @@ class Branch(db.Model):
     employees = db.relationship('Employee', backref='branch', cascade='all, delete-orphan')
     
     def __repr__(self):
-        return f"Branch(branch_id = {self.branch_id}, branch_name = {self.branch_name}, address_line1 = {self.address_line1}, address_line2 = {self.address_line2}, city = {self.city}, state = {self.state}, zip_code = {self.zip_code}, phone_number = {self.phone_number})"
+        return f"Branch(branch_id = {self.branch_id}, branch_name = {self.branch_name}, address_line1 = {self.address_line1}, address_line2 = {self.address_line2}, city = {self.city}, zip_code = {self.zip_code}, phone_number = {self.phone_number})"
 
 class Customer(db.Model):
     __tablename__ = 'customer'
@@ -45,9 +44,8 @@ class Customer(db.Model):
     address_line1 = db.Column(db.String(255), nullable=False)
     address_line2 = db.Column(db.String(255))
     city = db.Column(db.String(100), nullable=False)
-    state = db.Column(db.String(100), nullable=False)
     zip_code = db.Column(db.String(20), nullable=False)
-    branch_id = db.Column(BINARY(16), db.ForeignKey('branch.branch_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
+    wage_declaration = db.Column(db.DECIMAL(15, 2), default=0)
 
     # Relationships
     accounts = db.relationship('Account', backref='customer', cascade='all, delete-orphan')
@@ -56,7 +54,7 @@ class Customer(db.Model):
     credit_score = db.relationship('CreditScore', backref='customer', uselist=False, cascade='all, delete-orphan')
 
     def __repr__(self):
-        return f"Customer(customer_id = {self.customer_id}, first_name = {self.first_name}, last_name = {self.last_name}, date_of_birth = {self.date_of_birth}, phone_number = {self.phone_number}, email = {self.email}, address_line1 = {self.address_line1}, address_line2 = {self.address_line2}, city = {self.city}, state = {self.state}, zip_code = {self.zip_code}, branch_id = {self.branch_id})"
+        return f"Customer(customer_id = {self.customer_id}, first_name = {self.first_name}, last_name = {self.last_name}, date_of_birth = {self.date_of_birth}, phone_number = {self.phone_number}, email = {self.email}, address_line1 = {self.address_line1}, address_line2 = {self.address_line2}, city = {self.city}, zip_code = {self.zip_code}, wage_declaration = {self.wage_declaration})"
 
 class Account(db.Model):
     __tablename__ = 'account'
@@ -66,6 +64,7 @@ class Account(db.Model):
     account_type = db.Column(db.Enum('CHECKING', 'SAVINGS'), nullable=False)
     balance = db.Column(db.DECIMAL(15,2), nullable=False, default=0.00)
     creation_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    branch_id = db.Column(BINARY(16), db.ForeignKey('branch.branch_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
 
     cards = db.relationship('Card', backref='account', cascade='all, delete-orphan')
     outgoing_transactions = db.relationship('Transaction', foreign_keys='Transaction.from_account_id', backref='from_account', cascade='all, delete-orphan')
@@ -85,10 +84,10 @@ class Loan(db.Model):
     customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
     loan_type = db.Column(db.Enum('HOME', 'AUTO', 'PERSONAL'), nullable=False)
     principal_amount = db.Column(db.DECIMAL(15,2), nullable=False)
-    interest_rate = db.Column(db.DECIMAL(5,2), nullable=False, default=0.00)
+    interest_rate = db.Column(db.DECIMAL(5,2), nullable=False)
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
-    status = db.Column(db.Enum('ACTIVE', 'PAID_OFF', 'DEFAULT'), nullable=False, default='ACTIVE')
+    status = db.Column(db.Enum('ACTIVE', 'PAID_OFF', 'DEFAULT'), nullable=False)
 
     payments = db.relationship('LoanPayment', backref='loan', cascade='all, delete-orphan')
 
@@ -106,9 +105,9 @@ class LoanPayment(db.Model):
     
     loan_payment_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
     loan_id = db.Column(BINARY(16), db.ForeignKey('loan.loan_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
-    payment_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    payment_date = db.Column(db.DateTime, nullable=False)
     payment_amount = db.Column(db.DECIMAL(15,2), nullable=False)
-    remaining_balance = db.Column(db.DECIMAL(15,2), nullable=False)
+    remaining_balance = db.Column(db.DECIMAL(15,2))
 
     __table_args__ = (
         db.CheckConstraint('payment_amount > 0', name='check_payment_positive'),
@@ -126,8 +125,8 @@ class Employee(db.Model):
     first_name = db.Column(db.String(100), nullable=False)
     last_name = db.Column(db.String(100), nullable=False)
     position = db.Column(db.String(100), nullable=False)
-    hire_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    phone_number = db.Column(db.String(15), unique=True, nullable=False)
+    hire_date = db.Column(db.DateTime, nullable=False)
+    phone_number = db.Column(db.String(15), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False)
         
     def __repr__(self):
@@ -142,7 +141,7 @@ class Card(db.Model):
     card_number = db.Column(db.String(16), unique=True, nullable=False)
     expiration_date = db.Column(db.Date, nullable=False)
     cvv = db.Column(db.String(3), nullable=False)
-    status = db.Column(db.Enum('ACTIVE', 'BLOCKED', 'EXPIRED'), nullable=False, default='ACTIVE')
+    status = db.Column(db.Enum('ACTIVE', 'BLOCKED', 'EXPIRED'), nullable=False)
         
     def __repr__(self):
         return f"Card(card_id = {self.card_id}, account_id = {self.account_id}, card_type = {self.card_type}, card_number = {self.card_number}, expiration_date = {self.expiration_date}, cvv = {self.cvv}, status = {self.status})"
@@ -152,10 +151,10 @@ class Transaction(db.Model):
     
     transaction_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
     from_account_id = db.Column(BINARY(16), db.ForeignKey('account.account_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
-    to_account_id = db.Column(BINARY(16), db.ForeignKey('account.account_id', onupdate='CASCADE', ondelete='SET NULL'))
+    to_account_id = db.Column(BINARY(16), db.ForeignKey('account.account_id', onupdate='CASCADE', ondelete='SET NULL'), nullable=False)
     transaction_type = db.Column(db.Enum('DEPOSIT', 'WITHDRAWAL', 'TRANSFER'), nullable=False)
     amount = db.Column(db.DECIMAL(15,2), nullable=False)
-    transaction_timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    transaction_timestamp = db.Column(db.DateTime, nullable=False)
 
     __table_args__ = (
         db.CheckConstraint('amount > 0', name='check_amount_positive'),
@@ -169,14 +168,14 @@ class CustomerSupport(db.Model):
     
     ticket_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
     customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
+    employee_id = db.Column(BINARY(16), db.ForeignKey('employee.employee_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
     issue_description = db.Column(db.Text, nullable=False)
-    status = db.Column(db.Enum('OPEN', 'IN_PROGRESS', 'RESOLVED'), nullable=False, default='OPEN')
-    resolution_details = db.Column(db.Text)
-    created_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    status = db.Column(db.Enum('OPEN', 'IN_PROGRESS', 'RESOLVED'), nullable=False)
+    created_date = db.Column(db.DateTime, nullable=False)
     resolved_date = db.Column(db.DateTime)
         
     def __repr__(self):
-        return f"CustomerSupport(ticket_id = {self.ticket_id}, customer_id = {self.customer_id}, issue_description = {self.issue_description}, status = {self.status}, resolution_details = {self.resolution_details}, created_date = {self.created_date}, resolved_date = {self.resolved_date})"
+        return f"CustomerSupport(ticket_id = {self.ticket_id}, customer_id = {self.customer_id}, employee_id = {self.employee_id}, issue_description = {self.issue_description}, status = {self.status}, created_date = {self.created_date}, resolved_date = {self.resolved_date})"
 
 class CreditScore(db.Model):
     __tablename__ = 'credit_score'
@@ -186,10 +185,6 @@ class CreditScore(db.Model):
     score = db.Column(db.DECIMAL(5,2), nullable=False)
     risk_category = db.Column(db.String(50), nullable=False)
     computed_by_system = db.Column(db.Boolean)
-
-    __table_args__ = (
-        db.CheckConstraint('score >= 300 AND score <= 850', name='check_score_range'),
-    )
         
     def __repr__(self):
         return f"CreditScore(credit_score_id = {self.credit_score_id}, customer_id = {self.customer_id}, score = {self.score}, risk_category = {self.risk_category}, computed_by_system = {self.computed_by_system})"
@@ -228,7 +223,7 @@ customer_args.add_argument('address_line2', type=str)
 customer_args.add_argument('city', type=str, required=True, help='City is required')
 customer_args.add_argument('state', type=str, required=True, help='State is required')
 customer_args.add_argument('zip_code', type=str, required=True, help='Zip code is required')
-customer_args.add_argument('branch_id', type=str, required=True, help='Branch ID is required')
+customer_args.add_argument('branch_id', type=validate_uuid, required=True, help='Branch ID is required')
 
 account_args = reqparse.RequestParser()
 account_args.add_argument('customer_id', type=validate_uuid, required=True, help='Valid Customer UUID is required')
@@ -944,17 +939,16 @@ def get_branches_with_conditions(min_employees=5, min_accounts=3):
     :param min_accounts: Minimum number of accounts required (default is 3).
     :return: List of dictionaries containing branch names, employee counts, and account counts.
     """
-    query = """
+    query = text("""
     SELECT B.branch_name, 
-           COUNT(E.employee_id) AS employee_count, 
-           COUNT(A.account_id) AS account_count 
-    FROM Branch B 
-    JOIN Employee E ON B.branch_id = E.branch_id 
-    JOIN Account A ON B.branch_id = A.branch_id 
-    GROUP BY B.branch_name 
-    HAVING COUNT(E.employee_id) > :min_employees 
-           AND COUNT(A.account_id) >= :min_accounts;
-    """
+       COUNT(DISTINCT E.employee_id) AS employee_count, 
+       COUNT(DISTINCT A.account_id) AS account_count 
+        FROM Branch B 
+        LEFT JOIN Employee E ON B.branch_id = E.branch_id 
+        LEFT JOIN Account A ON B.branch_id = A.branch_id 
+        GROUP BY B.branch_name 
+        HAVING employee_count > :min_employees AND account_count >= :min_accounts;
+    """)
     results = db.session.execute(query, {'min_employees': min_employees, 'min_accounts': min_accounts}).fetchall()
     return [dict(row) for row in results]
 
@@ -963,18 +957,20 @@ def api_branches_with_conditions():
     """
     API endpoint to fetch branches with a minimum number of employees and accounts.
     """
-    # Get the query parameters (defaults are 5 employees and 3 accounts)
     min_employees = request.args.get('min_employees', default=5, type=int)
     min_accounts = request.args.get('min_accounts', default=3, type=int)
 
-    # Fetch results using the helper function
-    results = get_branches_with_conditions(min_employees, min_accounts)
+    if min_employees < 0 or min_accounts < 0:
+        return jsonify({'error': 'Minimum values must be non-negative integers.'}), 400
 
-    # Return the results as JSON
-    if results:
-        return jsonify(results), 200
-    else:
-        return jsonify({'message': 'No branches found matching the specified criteria.'}), 404
+    try:
+        results = get_branches_with_conditions(min_employees, min_accounts)
+        if results:
+            return jsonify(results), 200
+        else:
+            return jsonify({'message': 'No branches found matching the specified criteria.'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 def get_customers_with_high_transactions(min_transaction_total=10000):
     """
@@ -983,14 +979,14 @@ def get_customers_with_high_transactions(min_transaction_total=10000):
     :param min_transaction_total: Minimum transaction total required (default is $10,000).
     :return: List of dictionaries containing customer details and total transaction amounts.
     """
-    query = """
-    SELECT C.customer_id, C.first_name, C.last_name, SUM(T.amount) AS total_transaction 
-    FROM Customer C 
-    JOIN Account A ON C.customer_id = A.customer_id 
-    JOIN Transaction T ON A.account_id = T.from_account_id OR A.account_id = T.to_account_id 
-    GROUP BY C.customer_id, C.first_name, C.last_name 
+    query = text("""
+    SELECT C.customer_id, C.first_name, C.last_name, SUM(T.amount) AS total_transaction
+    FROM Customer C
+    JOIN Account A ON C.customer_id = A.customer_id
+    JOIN "Transaction" T ON A.account_id = T.from_account_id OR A.account_id = T.to_account_id
+    GROUP BY C.customer_id, C.first_name, C.last_name
     HAVING SUM(T.amount) > :min_transaction_total;
-    """
+    """)
     results = db.session.execute(query, {'min_transaction_total': min_transaction_total}).fetchall()
     return [dict(row) for row in results]
 
@@ -1001,51 +997,26 @@ def api_customers_high_transactions():
     """
     min_transaction_total = request.args.get('min_transaction_total', type=float, default=10000)
     results = get_customers_with_high_transactions(min_transaction_total)
+    if not results:
+        return jsonify({'message': 'No customers found with transactions exceeding the specified amount.'}), 404
     return jsonify(results)
-
-def get_employees_with_max_resolved_tickets():
-    """
-    Fetch employees who resolved the highest number of customer support tickets.
-
-    :return: List of dictionaries containing employee details and resolved ticket counts.
-    """
-    query = """
-    SELECT E.first_name, E.last_name, COUNT(CS.ticket_id) AS resolved_tickets 
-    FROM Employee E 
-    JOIN Customer_Support CS ON E.employee_id = CS.employee_id 
-    WHERE CS.status = 'RESOLVED'
-    GROUP BY E.employee_id, E.first_name, E.last_name 
-    HAVING COUNT(CS.ticket_id) = ( 
-        SELECT MAX(ticket_count)
-        FROM ( 
-            SELECT COUNT(ticket_id) AS ticket_count 
-            FROM Customer_Support 
-            WHERE status = 'RESOLVED' 
-            GROUP BY employee_id
-        ) AS subquery 
-    );
-    """
-    results = db.session.execute(query).fetchall()
-    return [dict(row) for row in results]
 
 @app.route('/api/employee/top-resolvers', methods=['GET'])
 def api_employees_top_resolvers():
-    query = """
-    SELECT E.first_name, E.last_name, COUNT(CS.ticket_id) AS resolved_tickets 
-    FROM Employee E 
-    JOIN Customer_Support CS ON E.employee_id = CS.employee_id 
-    WHERE CS.status = 'RESOLVED'
-    GROUP BY E.employee_id, E.first_name, E.last_name 
-    HAVING COUNT(CS.ticket_id) = ( 
-        SELECT MAX(ticket_count)
-        FROM ( 
-            SELECT COUNT(ticket_id) AS ticket_count 
-            FROM Customer_Support 
-            WHERE status = 'RESOLVED' 
-            GROUP BY employee_id
-        ) AS subquery 
+    query = text("""
+    WITH ResolvedTickets AS (
+        SELECT E.employee_id, E.first_name, E.last_name, COUNT(CS.ticket_id) AS resolved_tickets
+        FROM Employee E
+        JOIN Customer_Support CS ON E.employee_id = CS.employee_id
+        WHERE CS.status = 'RESOLVED'
+        GROUP BY E.employee_id, E.first_name, E.last_name
+    )
+    SELECT employee_id, first_name, last_name, resolved_tickets
+    FROM ResolvedTickets
+    WHERE resolved_tickets = (
+        SELECT MAX(resolved_tickets) FROM ResolvedTickets
     );
-    """
+    """)
     results = db.session.execute(query).fetchall()
     return jsonify([dict(row) for row in results])
 
