@@ -958,6 +958,24 @@ def get_branches_with_conditions(min_employees=5, min_accounts=3):
     results = db.session.execute(query, {'min_employees': min_employees, 'min_accounts': min_accounts}).fetchall()
     return [dict(row) for row in results]
 
+@app.route('/api/branches', methods=['GET'])
+def api_branches_with_conditions():
+    """
+    API endpoint to fetch branches with a minimum number of employees and accounts.
+    """
+    # Get the query parameters (defaults are 5 employees and 3 accounts)
+    min_employees = request.args.get('min_employees', default=5, type=int)
+    min_accounts = request.args.get('min_accounts', default=3, type=int)
+
+    # Fetch results using the helper function
+    results = get_branches_with_conditions(min_employees, min_accounts)
+
+    # Return the results as JSON
+    if results:
+        return jsonify(results), 200
+    else:
+        return jsonify({'message': 'No branches found matching the specified criteria.'}), 404
+
 def get_customers_with_high_transactions(min_transaction_total=10000):
     """
     Fetch customers who made transactions totaling more than a specified amount.
