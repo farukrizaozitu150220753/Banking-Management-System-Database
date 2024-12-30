@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import uuid
@@ -935,6 +935,101 @@ resources = [
 
 for resource, route in resources:
     api.add_resource(resource, route)
+
+def get_branches_with_conditions(min_employees=5, min_accounts=3):
+    """
+    Fetch branches with a minimum number of employees and accounts.
+
+    :param min_employees: Minimum number of employees required (default is 5).
+    :param min_accounts: Minimum number of accounts required (default is 3).
+    :return: List of dictionaries containing branch names, employee counts, and account counts.
+    """
+    query = """
+    SELECT B.branch_name, 
+           COUNT(E.employee_id) AS employee_count, 
+           COUNT(A.account_id) AS account_count 
+    FROM Branch B 
+    JOIN Employee E ON B.branch_id = E.branch_id 
+    JOIN Account A ON B.branch_id = A.branch_id 
+    GROUP BY B.branch_name 
+    HAVING COUNT(E.employee_id) > :min_employees 
+           AND COUNT(A.account_id) >= :min_accounts;
+    """
+    results = db.session.execute(query, {'min_employees': min_employees, 'min_accounts': min_accounts}).fetchall()
+    return [dict(row) for row in results]
+
+def get_customers_with_high_transactions(min_transaction_total=10000):
+    """
+    Fetch customers who made transactions totaling more than a specified amount.
+
+    :param min_transaction_total: Minimum transaction total required (default is $10,000).
+    :return: List of dictionaries containing customer details and total transaction amounts.
+    """
+    query = """
+    SELECT C.customer_id, C.first_name, C.last_name, SUM(T.amount) AS total_transaction 
+    FROM Customer C 
+    JOIN Account A ON C.customer_id = A.customer_id 
+    JOIN Transaction T ON A.account_id = T.from_account_id OR A.account_id = T.to_account_id 
+    GROUP BY C.customer_id, C.first_name, C.last_name 
+    HAVING SUM(T.amount) > :min_transaction_total;
+    """
+    results = db.session.execute(query, {'min_transaction_total': min_transaction_total}).fetchall()
+    return [dict(row) for row in results]
+
+@app.route('/api/customer/high-transactions', methods=['GET'])
+def api_customers_high_transactions():
+    """
+    API endpoint to fetch customers who made transactions totaling more than a specified amount.
+    """
+    min_transaction_total = request.args.get('min_transaction_total', type=float, default=10000)
+    results = get_customers_with_high_transactions(min_transaction_total)
+    return jsonify(results)
+
+def get_employees_with_max_resolved_tickets():
+    """
+    Fetch employees who resolved the highest number of customer support tickets.
+
+    :return: List of dictionaries containing employee details and resolved ticket counts.
+    """
+    query = """
+    SELECT E.first_name, E.last_name, COUNT(CS.ticket_id) AS resolved_tickets 
+    FROM Employee E 
+    JOIN Customer_Support CS ON E.employee_id = CS.employee_id 
+    WHERE CS.status = 'RESOLVED'
+    GROUP BY E.employee_id, E.first_name, E.last_name 
+    HAVING COUNT(CS.ticket_id) = ( 
+        SELECT MAX(ticket_count)
+        FROM ( 
+            SELECT COUNT(ticket_id) AS ticket_count 
+            FROM Customer_Support 
+            WHERE status = 'RESOLVED' 
+            GROUP BY employee_id
+        ) AS subquery 
+    );
+    """
+    results = db.session.execute(query).fetchall()
+    return [dict(row) for row in results]
+
+@app.route('/api/employee/top-resolvers', methods=['GET'])
+def api_employees_top_resolvers():
+    query = """
+    SELECT E.first_name, E.last_name, COUNT(CS.ticket_id) AS resolved_tickets 
+    FROM Employee E 
+    JOIN Customer_Support CS ON E.employee_id = CS.employee_id 
+    WHERE CS.status = 'RESOLVED'
+    GROUP BY E.employee_id, E.first_name, E.last_name 
+    HAVING COUNT(CS.ticket_id) = ( 
+        SELECT MAX(ticket_count)
+        FROM ( 
+            SELECT COUNT(ticket_id) AS ticket_count 
+            FROM Customer_Support 
+            WHERE status = 'RESOLVED' 
+            GROUP BY employee_id
+        ) AS subquery 
+    );
+    """
+    results = db.session.execute(query).fetchall()
+    return jsonify([dict(row) for row in results])
 
 @app.route('/')
 def home():
