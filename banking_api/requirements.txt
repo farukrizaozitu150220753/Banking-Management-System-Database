@@ -11,7 +11,6 @@ itsdangerous==2.2.0
 Jinja2==3.1.5
 MarkupSafe==3.0.2
 pytz==2024.2
-setuptools==75.6.0
 six==1.17.0
 SQLAlchemy==2.0.36
 typing_extensions==4.12.2

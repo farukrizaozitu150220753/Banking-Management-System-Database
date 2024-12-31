@@ -1,2 +1,12 @@
+# Ignore virtual environments
 .venv
-__pycache__
+
+# Ignore __pycache__ directories
+__pycache__/
+**/__pycache__/
+
+# Ignore environment files
+.env
+
+# Optional: If `banking_api\__pycache__` is a specific directory to ignore
+banking_api/__pycache__/
