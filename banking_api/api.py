@@ -56,9 +56,9 @@ class User(db.Model):
     __tablename__ = 'user'
     user_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
     username = db.Column(db.String(100), unique=True, nullable=False)
-    password = db.Column(db.String(100), nullable=False)  # Use hashed passwords
+    password = db.Column(db.String(100), nullable=False)
     role = db.Column(db.Enum('ADMIN', 'USER'), nullable=False, default='USER')
-    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', ondelete='SET NULL'))
+    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', onupdate='CASCADE', ondelete='RESTRICT'))
 
     customer = db.relationship('Customer', backref='user', uselist=False)
 
@@ -77,9 +77,9 @@ class Branch(db.Model):
     phone_number = db.Column(db.String(15), unique=True, nullable=False)
 
     # Relationships
-    customers = db.relationship('Customer', backref='branch', cascade='all, delete-orphan')
-    employees = db.relationship('Employee', backref='branch', cascade='all, delete-orphan')
-    
+    accounts = db.relationship('Account', backref='branch', lazy=True)
+    employees = db.relationship('Employee', backref='branch', lazy=True)
+
     def __repr__(self):
         return f"Branch(branch_id = {self.branch_id}, branch_name = {self.branch_name}, address_line1 = {self.address_line1}, address_line2 = {self.address_line2}, city = {self.city}, zip_code = {self.zip_code}, phone_number = {self.phone_number})"
 
@@ -180,6 +180,8 @@ class Employee(db.Model):
     phone_number = db.Column(db.String(15), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False)
         
+    support_tickets = db.relationship('CustomerSupport', backref='employee', cascade='all, delete-orphan')
+    
     def __repr__(self):
         return f"Employee(employee_id = {self.employee_id}, branch_id = {self.branch_id}, first_name = {self.first_name}, last_name = {self.last_name}, position = {self.position}, hire_date = {self.hire_date}, phone_number = {self.phone_number}, email = {self.email})"
 
@@ -1149,27 +1151,27 @@ class CreditScoreResource(Resource):
     
 resources = [
     (UserResourceAll, '/api/user/'),
-    (UserResource, '/api/user/<str:user_id>'),
+    (UserResource, '/api/user/<uuid:user_id>'),
     (BranchResourceAll, '/api/branch/'),
-    (BranchResource, '/api/branch/<str:branch_id>'),
+    (BranchResource, '/api/branch/<uuid:branch_id>'),
     (CustomerResourceAll, '/api/customer/'),
-    (CustomerResource, '/api/customer/<str:customer_id>'),
+    (CustomerResource, '/api/customer/<uuid:customer_id>'),
     (AccountResourceAll, '/api/account/'),
-    (AccountResource, '/api/account/<str:account_id>'),
+    (AccountResource, '/api/account/<uuid:account_id>'),
     (LoanResourceAll, '/api/loan/'),
-    (LoanResource, '/api/loan/<str:loan_id>'),
+    (LoanResource, '/api/loan/<uuid:loan_id>'),
     (LoanPaymentResourceAll, '/api/loanpayment/'),
-    (LoanPaymentResource, '/api/loanpayment/<str:loan_payment_id>'),
+    (LoanPaymentResource, '/api/loanpayment/<uuid:loan_payment_id>'),
     (EmployeeResourceAll, '/api/employee/'),
-    (EmployeeResource, '/api/employee/<str:employee_id>'),
+    (EmployeeResource, '/api/employee/<uuid:employee_id>'),
     (CardResourceAll, '/api/card/'),
-    (CardResource, '/api/card/<str:card_id>'),
+    (CardResource, '/api/card/<uuid:card_id>'),
     (TransactionResourceAll, '/api/transaction/'),
-    (TransactionResource, '/api/transaction/<str:transaction_id>'),
+    (TransactionResource, '/api/transaction/<uuid:transaction_id>'),
     (CustomerSupportResourceAll, '/api/customersupport/'),
-    (CustomerSupportResource, '/api/customersupport/<str:ticket_id>'),
+    (CustomerSupportResource, '/api/customersupport/<uuid:ticket_id>'),
     (CreditScoreResourceAll, '/api/creditscore/'),
-    (CreditScoreResource, '/api/creditscore/<str:credit_score_id>')
+    (CreditScoreResource, '/api/creditscore/<uuid:credit_score_id>')
 ]
 
 for resource, route in resources:
