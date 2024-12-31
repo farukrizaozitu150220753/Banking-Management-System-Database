@@ -5,6 +5,7 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.dialects.mysql import BINARY
 from flask_restful import Resource, Api, reqparse, fields, marshal_with, abort
+import re
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///banking_management.db'
@@ -63,7 +64,7 @@ class Account(db.Model):
     customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
     account_type = db.Column(db.Enum('CHECKING', 'SAVINGS'), nullable=False)
     balance = db.Column(db.DECIMAL(15,2), nullable=False, default=0.00)
-    creation_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    creation_date = db.Column(db.DateTime, nullable=False)
     branch_id = db.Column(BINARY(16), db.ForeignKey('branch.branch_id', onupdate='CASCADE', ondelete='RESTRICT'), nullable=False)
 
     cards = db.relationship('Card', backref='account', cascade='all, delete-orphan')
@@ -75,7 +76,7 @@ class Account(db.Model):
     )
     
     def __repr__(self):
-        return f"Account(account_id = {self.account_id}, customer_id = {self.customer_id}, account_type = {self.account_type}, balance = {self.balance}, creation_date = {self.creation_date})"
+        return f"Account(account_id = {self.account_id}, customer_id = {self.customer_id}, account_type = {self.account_type}, balance = {self.balance}, creation_date = {self.creation_date}, branch_id = {self.branch_id})"
 
 class Loan(db.Model):
     __tablename__ = 'loan'
@@ -203,82 +204,149 @@ def validate_enum(allowed_values):
         return value
     return validate
 
+def validate_date(date_string):
+    try:
+        return datetime.strptime(date_string, '%Y-%m-%d')
+    except ValueError:
+        raise ValueError("Date must be in the format YYYY-MM-DD")
+
+def validate_zip_code(zip_code):
+    if re.fullmatch(r'^\d{5}(-\d{4})?$', zip_code):
+        return zip_code
+    raise ValueError("ZIP code must be in the format 12345 or 12345-6789")
+
+def validate_email(email):
+    email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if re.fullmatch(email_regex, email):
+        return email
+    raise ValueError("Invalid email address")
+
+def validate_positive_number(value):
+    try:
+        value = float(value)
+    except ValueError:
+        raise ValueError("Value must be a number")
+    if value <= 0:
+        raise ValueError("Value must be greater than 0")
+    return value
+
+def validate_not_negative_number(value):
+    try:
+        value = float(value)
+    except ValueError:
+        raise ValueError("Value must be a number")
+    if value < 0:
+        raise ValueError("Value must be greater than or equal to 0")
+    return value
+
+def validate_card_number(card_number):
+    if not re.fullmatch(r'^\d{13,19}$', card_number):
+        raise ValueError("Card number must be 13 to 19 digits long")
+    return card_number
+
+def validate_cvv(cvv):
+    if not re.fullmatch(r'^\d{3}$', cvv):
+        raise ValueError("CVV must be 3 or 4 digits")
+    return cvv
+
+def validate_datetime(datetime_str, format="%Y-%m-%d %H:%M:%S"):
+    """
+    Validates a datetime string against a specified format.
+    
+    Args:
+        datetime_str (str): The datetime string to validate.
+        format (str): The expected datetime format. Default is '%Y-%m-%d %H:%M:%S'.
+        
+    Returns:
+        datetime: A valid datetime object.
+    
+    Raises:
+        ValueError: If the input string doesn't match the format.
+    """
+    try:
+        return datetime.strptime(datetime_str, format)
+    except ValueError:
+        raise ValueError(f"Invalid datetime. Expected format: {format}")
+
 branch_args = reqparse.RequestParser()
 branch_args.add_argument('branch_name', type=str, required=True, help='Branch name is required')
 branch_args.add_argument('address_line1', type=str, required=True, help='Address line 1 is required')
-branch_args.add_argument('address_line2', type=str)
+branch_args.add_argument('address_line2', type=str, required=False)
 branch_args.add_argument('city', type=str, required=True, help='City is required')
-branch_args.add_argument('state', type=str, required=True, help='State is required')
-branch_args.add_argument('zip_code', type=str, required=True, help='Zip code is required')
+branch_args.add_argument('zip_code', type=validate_zip_code, required=True, help='Zip code is required and must be in the format 12345 or 12345-6789')
 branch_args.add_argument('phone_number', type=str, required=True, help='Phone number is required')
 
 customer_args = reqparse.RequestParser()
 customer_args.add_argument('first_name', type=str, required=True, help='First name is required')
 customer_args.add_argument('last_name', type=str, required=True, help='Last name is required')
-customer_args.add_argument('date_of_birth', type=str, required=True, help='Date of birth is required')
+customer_args.add_argument('date_of_birth', type=validate_date, required=True, help='Date of birth is required and should be in format YYYY-MM-DD')
 customer_args.add_argument('phone_number', type=str, required=True, help='Phone number is required')
-customer_args.add_argument('email', type=str, required=True, help='Email is required')
+customer_args.add_argument('email', type=validate_email, required=True, help='Email is required and should be valid')
 customer_args.add_argument('address_line1', type=str, required=True, help='Address line 1 is required')
 customer_args.add_argument('address_line2', type=str)
 customer_args.add_argument('city', type=str, required=True, help='City is required')
-customer_args.add_argument('state', type=str, required=True, help='State is required')
-customer_args.add_argument('zip_code', type=str, required=True, help='Zip code is required')
-customer_args.add_argument('branch_id', type=validate_uuid, required=True, help='Branch ID is required')
+customer_args.add_argument('zip_code', type=validate_zip_code, required=True, help='Zip code is required and must be in the format 12345 or 12345-6789')
+customer_args.add_argument('wage_declaration', type=validate_not_negative_number, required=False, default=0, help='Wage declaration must be a non-negative number')
 
 account_args = reqparse.RequestParser()
 account_args.add_argument('customer_id', type=validate_uuid, required=True, help='Valid Customer UUID is required')
 account_args.add_argument('account_type', type=validate_enum(['CHECKING', 'SAVINGS']), required=True, help='Account type must be CHECKING or SAVINGS')
-account_args.add_argument('balance', type=float, help='Balance must be >= 0', default=0.00)
+account_args.add_argument('balance', type=validate_not_negative_number, help='Balance must be >= 0', default=0.0)
+account_args.add_argument('creation_date', type=validate_date, required=True, help='Creation date is required and should be in format YYYY-MM-DD')
+account_args.add_argument('branch_id', type=validate_uuid, required=True, help='Valid Branch UUID is required')
 
 loan_args = reqparse.RequestParser()
-loan_args.add_argument('customer_id', type=str, required=True, help='Customer ID is required')
-loan_args.add_argument('loan_type', type=str, required=True, help='Loan type is required')
-loan_args.add_argument('principal_amount', type=float, required=True, help='Principal amount is required')
-loan_args.add_argument('interest_rate', type=float)
-loan_args.add_argument('start_date', type=str, required=True, help='Start date is required')
-loan_args.add_argument('end_date', type=str, required=True, help='End date is required')
-loan_args.add_argument('status', type=str)
+loan_args.add_argument('customer_id', type=validate_uuid, required=True, help='Valid Customer UUID is required')
+loan_args.add_argument('loan_type', type=validate_enum(['HOME', 'AUTO', 'PERSONAL']), required=True, help='Loan type is required and should be in "[HOME, AUTO, PERSONAL]"')
+loan_args.add_argument('principal_amount', type=validate_positive_number, required=True, help='Principal amount is required and should be greater than 0')
+loan_args.add_argument('interest_rate', type=validate_positive_number, required=True, help='Interest rate is required and should be greater than 0')
+loan_args.add_argument('start_date', type=validate_date, required=True, help='Start date is required and should be in format YYYY-MM-DD')
+loan_args.add_argument('end_date', type=validate_date, required=True, help='End date is required and should be in format YYYY-MM-DD')
+loan_args.add_argument('status', type=validate_enum(['ACTIVE', 'PAID_OFF', 'DEFAULT']), required=True, help='Status is required and should be in "[ACTIVE, PAID_OFF, DEFAULT]"')
 
 loan_payment_args = reqparse.RequestParser()
-loan_payment_args.add_argument('loan_id', type=str, required=True, help='Loan ID is required')
-loan_payment_args.add_argument('payment_date', type=str)
-loan_payment_args.add_argument('payment_amount', type=float, required=True, help='Payment amount is required')
-loan_payment_args.add_argument('remaining_balance', type=float, required=True, help='Remaining balance is required')
+loan_payment_args.add_argument('loan_id', type=validate_uuid, required=True, help='Valid Loan UUID is required')
+loan_payment_args.add_argument('payment_date', type=validate_date, required=True, help='Payment date is required and should be in format YYYY-MM-DD')
+loan_payment_args.add_argument('payment_amount', type=validate_positive_number, required=True, help='Payment amount is required and should not be less than 0')
+loan_payment_args.add_argument('remaining_balance', type=validate_not_negative_number, help='Remaining balance should not be less than 0')
 
 employee_args = reqparse.RequestParser()
-employee_args.add_argument('branch_id', type=str, required=True, help='Branch ID is required')
+employee_args.add_argument('branch_id', type=validate_uuid, required=True, help='Valid Branch UUID is required')
 employee_args.add_argument('first_name', type=str, required=True, help='First name is required')
 employee_args.add_argument('last_name', type=str, required=True, help='Last name is required')
 employee_args.add_argument('position', type=str, required=True, help='Position is required')
+employee_args.add_argument('hire_date', type=validate_date, required=True, help='Hire date is required and should be in format YYYY-MM-DD')
 employee_args.add_argument('phone_number', type=str, required=True, help='Phone number is required')
-employee_args.add_argument('email', type=str, required=True, help='Email is required')
+employee_args.add_argument('email', type=validate_email, required=True, help='Email is required and should be valid')
 
 card_args = reqparse.RequestParser()
-card_args.add_argument('account_id', type=str, required=True, help='Account ID is required')
-card_args.add_argument('card_type', type=str, required=True, help='Card type is required')
-card_args.add_argument('card_number', type=str, required=True, help='Card number is required')
-card_args.add_argument('expiration_date', type=str, required=True, help='Expiration date is required')
-card_args.add_argument('cvv', type=str, required=True, help='CVV is required')
-card_args.add_argument('status', type=str)
+card_args.add_argument('account_id', type=validate_uuid, required=True, help='Valid Account UUID is required')
+card_args.add_argument('card_type', type=validate_enum(['DEBIT','CREDIT']), required=True, help='Card type is required and should be in "[DEBIT, CREDIT]"')
+card_args.add_argument('card_number', type=validate_card_number, required=True, help='Card number is required and should be valid')
+card_args.add_argument('expiration_date', type=validate_date, required=True, help='Expiration date is required and should be in format YYYY-MM-DD')
+card_args.add_argument('cvv', type=validate_cvv, required=True, help='CVV is required and should be 3 digits')
+card_args.add_argument('status', type=validate_enum(['ACTIVE','BLOCKED','EXPIRED']), required=True, help='Status is required and should be in "[ACTIVE, BLOCKED, EXPIRED]"')
 
 transaction_args = reqparse.RequestParser()
-transaction_args.add_argument('from_account_id', type=str, required=True, help='From account ID is required')
-transaction_args.add_argument('to_account_id', type=str)
-transaction_args.add_argument('transaction_type', type=str, required=True, help='Transaction type is required')
-transaction_args.add_argument('amount', type=float, required=True, help='Amount is required')
+transaction_args.add_argument('from_account_id', type=validate_uuid, required=True, help='Valid from account UUID is required')
+transaction_args.add_argument('to_account_id', type=validate_uuid)
+transaction_args.add_argument('transaction_type', type=validate_enum(['DEPOSIT','WITHDRAWAL','TRANSFER']), required=True, help='Transaction type is required and should be in "[DEPOSIT,WITHDRAWAL,TRANSFER]"')
+transaction_args.add_argument('amount', type=validate_positive_number, required=True, help='Amount is required and should be greater than 0')
+transaction_args.add_argument('transaction_timestamp', type=validate_datetime, required=True, help='Transaction timestamp is required and should be in format "%Y-%m-%d %H:%M:%S"')
 
 customer_support_args = reqparse.RequestParser()
-customer_support_args.add_argument('customer_id', type=str, required=True, help='Customer ID is required')
+customer_support_args.add_argument('customer_id', type=validate_uuid, required=True, help='Valid Customer UUID is required')
+customer_support_args.add_argument('employee_id', type=validate_uuid, required=True, help='Valid Employee UUID is required')
 customer_support_args.add_argument('issue_description', type=str, required=True, help='Issue description is required')
-customer_support_args.add_argument('status', type=str)
-customer_support_args.add_argument('resolution_details', type=str)
-customer_support_args.add_argument('resolved_date', type=str)
+customer_support_args.add_argument('status', type=validate_enum(['OPEN','IN_PROGRESS','RESOLVED']), required=True, help='Status is required and should be in "[OPEN, IN_PROGRESS, RESOLVED]"')
+customer_support_args.add_argument('created_date', type=validate_datetime, required=True, help='Created date should be in format "%Y-%m-%d %H:%M:%S"')
+customer_support_args.add_argument('resolved_date', type=validate_datetime, help='Resolved date should be in format "%Y-%m-%d %H:%M:%S"')
 
 credit_score_args = reqparse.RequestParser()
-credit_score_args.add_argument('customer_id', type=str, required=True, help='Customer ID is required')
-credit_score_args.add_argument('score', type=float, required=True, help='Credit score is required')
+credit_score_args.add_argument('customer_id', type=validate_uuid, required=True, help='Customer ID is required')
+credit_score_args.add_argument('score', type=float, required=True, help='Credit score is required and should be a numeric value')
 credit_score_args.add_argument('risk_category', type=str, required=True, help='Risk category is required')
-credit_score_args.add_argument('computed_by_system', type=bool, required=True, help='Computed by system is required')
+credit_score_args.add_argument('computed_by_system', type=bool, help='Computed by system is required and should be a boolean')
 
 branch_fields = {
     'branch_id': fields.String,
@@ -286,7 +354,6 @@ branch_fields = {
     'address_line1': fields.String,
     'address_line2': fields.String,
     'city': fields.String,
-    'state': fields.String,
     'zip_code': fields.String,
     'phone_number': fields.String,
 }
@@ -301,9 +368,8 @@ customer_fields = {
     'address_line1': fields.String,
     'address_line2': fields.String,
     'city': fields.String,
-    'state': fields.String,
     'zip_code': fields.String,
-    'branch_id': fields.String,
+    'wage_declaration': fields.String,
 }
 
 account_fields = {
@@ -312,6 +378,7 @@ account_fields = {
     'account_type': fields.String,
     'balance': fields.Float,
     'creation_date': fields.DateTime,
+    'branch_id': fields.String,
 }
 
 loan_fields = {
@@ -366,9 +433,9 @@ transaction_fields = {
 customer_support_fields = {
     'ticket_id': fields.String,
     'customer_id': fields.String,
+    'employee_id': fields.String,
     'issue_description': fields.String,
     'status': fields.String,
-    'resolution_details': fields.String,
     'created_date': fields.DateTime,
     'resolved_date': fields.DateTime,
 }
@@ -395,7 +462,6 @@ class BranchResourceAll(Resource):
             address_line1=args['address_line1'], 
             address_line2=args['address_line2'], 
             city=args['city'], 
-            state=args['state'], 
             zip_code=args['zip_code'], 
             phone_number=args['phone_number']
         )
@@ -422,7 +488,6 @@ class BranchResource(Resource):
         branch.address_line1 = args['address_line1']
         branch.address_line2 = args['address_line2']
         branch.city = args['city']
-        branch.state = args['state']
         branch.zip_code = args['zip_code']
         branch.phone_number = args['phone_number']
         db.session.commit()
@@ -454,9 +519,8 @@ class CustomerResourceAll(Resource):
             address_line1=args['address_line1'], 
             address_line2=args['address_line2'], 
             city=args['city'], 
-            state=args['state'], 
             zip_code=args['zip_code'], 
-            branch_id=args['branch_id']
+            wage_declaration=args['wage_declaration']
         )
         db.session.add(customer)
         db.session.commit()
@@ -485,9 +549,8 @@ class CustomerResource(Resource):
         customer.address_line1 = args['address_line1']
         customer.address_line2 = args['address_line2']
         customer.city = args['city']
-        customer.state = args['state']
         customer.zip_code = args['zip_code']
-        customer.branch_id = args['branch_id']
+        customer.wage_declaration = args['wage_declaration']
         db.session.commit()
         return customer
     
@@ -511,7 +574,9 @@ class AccountResourceAll(Resource):
         account = Account(
             customer_id=args['customer_id'], 
             account_type=args['account_type'], 
-            balance=args['balance']
+            balance=args['balance'],
+            creation_date=args['creation_date'],
+            branch_id=args['branch_id']
         )
         db.session.add(account)
         db.session.commit()
@@ -535,6 +600,8 @@ class AccountResource(Resource):
         account.customer_id = args['customer_id']
         account.account_type = args['account_type']
         account.balance = args['balance']
+        account.creation_date = args['creation_date']
+        account.branch_id = args['branch_id']
         db.session.commit()
         return account
     
@@ -664,6 +731,7 @@ class EmployeeResourceAll(Resource):
             first_name=args['first_name'], 
             last_name=args['last_name'], 
             position=args['position'], 
+            hire_date=args['hire_date'],
             phone_number=args['phone_number'], 
             email=args['email']
         )
@@ -690,6 +758,7 @@ class EmployeeResource(Resource):
         employee.first_name = args['first_name']
         employee.last_name = args['last_name']
         employee.position = args['position']
+        employee.hire_date = args['hire_date']
         employee.phone_number = args['phone_number']
         employee.email = args['email']
         db.session.commit()
@@ -769,7 +838,8 @@ class TransactionResourceAll(Resource):
             from_account_id=args['from_account_id'], 
             to_account_id=args['to_account_id'], 
             transaction_type=args['transaction_type'], 
-            amount=args['amount']
+            amount=args['amount'],
+            transaction_timestamp=args['transaction_timestamp']
         )
         db.session.add(transaction)
         db.session.commit()
@@ -794,6 +864,7 @@ class TransactionResource(Resource):
         transaction.to_account_id = args['to_account_id']
         transaction.transaction_type = args['transaction_type']
         transaction.amount = args['amount']
+        transaction.transaction_timestamp = args['transaction_timestamp']
         db.session.commit()
         return transaction
     
@@ -816,9 +887,10 @@ class CustomerSupportResourceAll(Resource):
         args = customer_support_args.parse_args()
         customer_support = CustomerSupport(
             customer_id=args['customer_id'], 
+            employee_id=args['employee_id'], 
             issue_description=args['issue_description'], 
-            status=args['status'], 
-            resolution_details=args['resolution_details'], 
+            status=args['status'],
+            created_date=args['created_date'], 
             resolved_date=args['resolved_date']
         )
         db.session.add(customer_support)
@@ -841,9 +913,10 @@ class CustomerSupportResource(Resource):
         if not customer_support:
             abort(404, message='Customer support ticket not found')
         customer_support.customer_id = args['customer_id']
+        customer_support.employee_id = args['employee_id']
         customer_support.issue_description = args['issue_description']
         customer_support.status = args['status']
-        customer_support.resolution_details = args['resolution_details']
+        customer_support.created_date = args['created_date']
         customer_support.resolved_date = args['resolved_date']
         db.session.commit()
         return customer_support
