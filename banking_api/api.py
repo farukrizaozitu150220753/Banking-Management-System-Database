@@ -6,14 +6,64 @@ from sqlalchemy import text
 from sqlalchemy.dialects.mysql import BINARY
 from flask_restful import Resource, Api, reqparse, fields, marshal_with, abort
 import re
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///banking_management.db'
 db = SQLAlchemy(app)
 api = Api(app)
+app.config['JWT_SECRET_KEY'] = 'super_secret_key'  # Use a strong, secure secret key
+jwt = JWTManager(app)
+
+@app.route('/api/protected', methods=['GET'])
+@jwt_required()
+def protected():
+    current_user = get_jwt_identity()
+    return jsonify({'message': f'Hello, {current_user["user_id"]}! You have access.'}), 200
+
+def admin_required(fn):
+    @jwt_required()
+    def wrapper(*args, **kwargs):
+        claims = get_jwt()
+        if claims['role'] != 'ADMIN':
+            return jsonify({'error': 'Admin access required'}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+def user_or_admin_required(fn):
+    @jwt_required()
+    def wrapper(*args, **kwargs):
+        claims = get_jwt()
+        if claims.get('role') not in ['ADMIN', 'USER']:
+            return {'error': 'Access denied'}, 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+@app.route('/api/admin-only', methods=['GET'])
+@admin_required
+def admin_only():
+    return jsonify({'message': 'Welcome, Admin!'}), 200
+
+@jwt.user_identity_loader
+def add_claims_to_access_token(identity):
+    return {'user_id': identity['user_id'], 'role': identity['role']}
 
 def generate_uuid():
     return uuid.uuid4().bytes
+
+class User(db.Model):
+    __tablename__ = 'user'
+    user_id = db.Column(BINARY(16), primary_key=True, default=generate_uuid)
+    username = db.Column(db.String(100), unique=True, nullable=False)
+    password = db.Column(db.String(100), nullable=False)  # Use hashed passwords
+    role = db.Column(db.Enum('ADMIN', 'USER'), nullable=False, default='USER')
+    customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', ondelete='SET NULL'))
+
+    customer = db.relationship('Customer', backref='user', uselist=False)
+
+    def __repr__(self):
+        return f"User(user_id={self.user_id}, username={self.username}, role={self.role})"
 
 class Branch(db.Model):
     __tablename__ = 'branch'
@@ -197,13 +247,6 @@ def validate_uuid(value):
     except ValueError:
         raise ValueError('Invalid UUID format')
 
-def validate_enum(allowed_values):
-    def validate(value):
-        if value not in allowed_values:
-            raise ValueError(f'Value must be one of {allowed_values}')
-        return value
-    return validate
-
 def validate_date(date_string):
     try:
         return datetime.strptime(date_string, '%Y-%m-%d')
@@ -268,19 +311,31 @@ def validate_datetime(datetime_str, format="%Y-%m-%d %H:%M:%S"):
     except ValueError:
         raise ValueError(f"Invalid datetime. Expected format: {format}")
 
+def validate_phone_number(phone):
+    phone_regex = r'^\+?[0-9\s\-()]{7,15}$'
+    if not re.fullmatch(phone_regex, phone):
+        raise ValueError("Invalid phone number format")
+    return phone
+
+user_args = reqparse.RequestParser()
+user_args.add_argument('username', type=str, required=True, help='Username is required')
+user_args.add_argument('password', type=str, required=True, help='Password is required')
+user_args.add_argument('role', type=str, required=False, choices=('ADMIN', 'USER'), help='Role must be ADMIN or USER')
+user_args.add_argument('customer_id', type=validate_uuid, required=False, help='Valid customer UUID is required')
+
 branch_args = reqparse.RequestParser()
 branch_args.add_argument('branch_name', type=str, required=True, help='Branch name is required')
 branch_args.add_argument('address_line1', type=str, required=True, help='Address line 1 is required')
 branch_args.add_argument('address_line2', type=str, required=False)
 branch_args.add_argument('city', type=str, required=True, help='City is required')
 branch_args.add_argument('zip_code', type=validate_zip_code, required=True, help='Zip code is required and must be in the format 12345 or 12345-6789')
-branch_args.add_argument('phone_number', type=str, required=True, help='Phone number is required')
+branch_args.add_argument('phone_number', type=validate_phone_number, required=True, help='Valid phone number is required')
 
 customer_args = reqparse.RequestParser()
 customer_args.add_argument('first_name', type=str, required=True, help='First name is required')
 customer_args.add_argument('last_name', type=str, required=True, help='Last name is required')
 customer_args.add_argument('date_of_birth', type=validate_date, required=True, help='Date of birth is required and should be in format YYYY-MM-DD')
-customer_args.add_argument('phone_number', type=str, required=True, help='Phone number is required')
+customer_args.add_argument('phone_number', type=validate_phone_number, required=True, help='Valid phone number is required')
 customer_args.add_argument('email', type=validate_email, required=True, help='Email is required and should be valid')
 customer_args.add_argument('address_line1', type=str, required=True, help='Address line 1 is required')
 customer_args.add_argument('address_line2', type=str)
@@ -290,19 +345,19 @@ customer_args.add_argument('wage_declaration', type=validate_not_negative_number
 
 account_args = reqparse.RequestParser()
 account_args.add_argument('customer_id', type=validate_uuid, required=True, help='Valid Customer UUID is required')
-account_args.add_argument('account_type', type=validate_enum(['CHECKING', 'SAVINGS']), required=True, help='Account type must be CHECKING or SAVINGS')
+account_args.add_argument('account_type', type=str, choices=('CHECKING', 'SAVINGS'), required=True, help='Account type must be CHECKING or SAVINGS')
 account_args.add_argument('balance', type=validate_not_negative_number, help='Balance must be >= 0', default=0.0)
 account_args.add_argument('creation_date', type=validate_date, required=True, help='Creation date is required and should be in format YYYY-MM-DD')
 account_args.add_argument('branch_id', type=validate_uuid, required=True, help='Valid Branch UUID is required')
 
 loan_args = reqparse.RequestParser()
 loan_args.add_argument('customer_id', type=validate_uuid, required=True, help='Valid Customer UUID is required')
-loan_args.add_argument('loan_type', type=validate_enum(['HOME', 'AUTO', 'PERSONAL']), required=True, help='Loan type is required and should be in "[HOME, AUTO, PERSONAL]"')
+loan_args.add_argument('loan_type', type=str, choices=('HOME', 'AUTO', 'PERSONAL'), required=True, help='Loan type is required and should be in "[HOME, AUTO, PERSONAL]"')
 loan_args.add_argument('principal_amount', type=validate_positive_number, required=True, help='Principal amount is required and should be greater than 0')
 loan_args.add_argument('interest_rate', type=validate_positive_number, required=True, help='Interest rate is required and should be greater than 0')
 loan_args.add_argument('start_date', type=validate_date, required=True, help='Start date is required and should be in format YYYY-MM-DD')
 loan_args.add_argument('end_date', type=validate_date, required=True, help='End date is required and should be in format YYYY-MM-DD')
-loan_args.add_argument('status', type=validate_enum(['ACTIVE', 'PAID_OFF', 'DEFAULT']), required=True, help='Status is required and should be in "[ACTIVE, PAID_OFF, DEFAULT]"')
+loan_args.add_argument('status', type=str, choices=('ACTIVE', 'PAID_OFF', 'DEFAULT'), required=True, help='Status is required and should be in "[ACTIVE, PAID_OFF, DEFAULT]"')
 
 loan_payment_args = reqparse.RequestParser()
 loan_payment_args.add_argument('loan_id', type=validate_uuid, required=True, help='Valid Loan UUID is required')
@@ -316,21 +371,21 @@ employee_args.add_argument('first_name', type=str, required=True, help='First na
 employee_args.add_argument('last_name', type=str, required=True, help='Last name is required')
 employee_args.add_argument('position', type=str, required=True, help='Position is required')
 employee_args.add_argument('hire_date', type=validate_date, required=True, help='Hire date is required and should be in format YYYY-MM-DD')
-employee_args.add_argument('phone_number', type=str, required=True, help='Phone number is required')
+employee_args.add_argument('phone_number', type=validate_phone_number, required=True, help='Valid phone number is required')
 employee_args.add_argument('email', type=validate_email, required=True, help='Email is required and should be valid')
 
 card_args = reqparse.RequestParser()
 card_args.add_argument('account_id', type=validate_uuid, required=True, help='Valid Account UUID is required')
-card_args.add_argument('card_type', type=validate_enum(['DEBIT','CREDIT']), required=True, help='Card type is required and should be in "[DEBIT, CREDIT]"')
+card_args.add_argument('card_type', type=str, choices=('DEBIT','CREDIT'), required=True, help='Card type is required and should be in "[DEBIT, CREDIT]"')
 card_args.add_argument('card_number', type=validate_card_number, required=True, help='Card number is required and should be valid')
 card_args.add_argument('expiration_date', type=validate_date, required=True, help='Expiration date is required and should be in format YYYY-MM-DD')
 card_args.add_argument('cvv', type=validate_cvv, required=True, help='CVV is required and should be 3 digits')
-card_args.add_argument('status', type=validate_enum(['ACTIVE','BLOCKED','EXPIRED']), required=True, help='Status is required and should be in "[ACTIVE, BLOCKED, EXPIRED]"')
+card_args.add_argument('status', type=str, choices=('ACTIVE','BLOCKED','EXPIRED'), required=True, help='Status is required and should be in "[ACTIVE, BLOCKED, EXPIRED]"')
 
 transaction_args = reqparse.RequestParser()
 transaction_args.add_argument('from_account_id', type=validate_uuid, required=True, help='Valid from account UUID is required')
 transaction_args.add_argument('to_account_id', type=validate_uuid)
-transaction_args.add_argument('transaction_type', type=validate_enum(['DEPOSIT','WITHDRAWAL','TRANSFER']), required=True, help='Transaction type is required and should be in "[DEPOSIT,WITHDRAWAL,TRANSFER]"')
+transaction_args.add_argument('transaction_type', type=str, choices=('DEPOSIT','WITHDRAWAL','TRANSFER'), required=True, help='Transaction type is required and should be in "[DEPOSIT,WITHDRAWAL,TRANSFER]"')
 transaction_args.add_argument('amount', type=validate_positive_number, required=True, help='Amount is required and should be greater than 0')
 transaction_args.add_argument('transaction_timestamp', type=validate_datetime, required=True, help='Transaction timestamp is required and should be in format "%Y-%m-%d %H:%M:%S"')
 
@@ -338,7 +393,7 @@ customer_support_args = reqparse.RequestParser()
 customer_support_args.add_argument('customer_id', type=validate_uuid, required=True, help='Valid Customer UUID is required')
 customer_support_args.add_argument('employee_id', type=validate_uuid, required=True, help='Valid Employee UUID is required')
 customer_support_args.add_argument('issue_description', type=str, required=True, help='Issue description is required')
-customer_support_args.add_argument('status', type=validate_enum(['OPEN','IN_PROGRESS','RESOLVED']), required=True, help='Status is required and should be in "[OPEN, IN_PROGRESS, RESOLVED]"')
+customer_support_args.add_argument('status', type=str, choices=('OPEN','IN_PROGRESS','RESOLVED'), required=True, help='Status is required and should be in "[OPEN, IN_PROGRESS, RESOLVED]"')
 customer_support_args.add_argument('created_date', type=validate_datetime, required=True, help='Created date should be in format "%Y-%m-%d %H:%M:%S"')
 customer_support_args.add_argument('resolved_date', type=validate_datetime, help='Resolved date should be in format "%Y-%m-%d %H:%M:%S"')
 
@@ -347,6 +402,14 @@ credit_score_args.add_argument('customer_id', type=validate_uuid, required=True,
 credit_score_args.add_argument('score', type=float, required=True, help='Credit score is required and should be a numeric value')
 credit_score_args.add_argument('risk_category', type=str, required=True, help='Risk category is required')
 credit_score_args.add_argument('computed_by_system', type=bool, help='Computed by system is required and should be a boolean')
+
+user_fields = {
+    'user_id': fields.String,
+    'username': fields.String,
+    'password': fields.String,
+    'role': fields.String,
+    'customer_id': fields.String,
+}
 
 branch_fields = {
     'branch_id': fields.String,
@@ -448,13 +511,69 @@ credit_score_fields = {
     'computed_by_system': fields.Boolean,
 }
 
+class UserResourceAll(Resource):
+    @marshal_with(user_fields)
+    @admin_required
+    def get(self):
+        branch = User.query.all()
+        return branch
+
+    @marshal_with(user_fields)
+    @admin_required
+    def post(self):
+        args = user_args.parse_args()
+        user = User(
+            username=args['username'], 
+            password=args['password'], 
+            role=args['role'], 
+            customer_id=args['customer_id'] 
+        )
+        db.session.add(user)
+        db.session.commit()
+        users = User.query.all()
+        return users, 201
+
+class UserResource(Resource):
+    @marshal_with(user_fields)
+    @admin_required
+    def get(self, user_id):
+        user = User.query.filter_by(user_id=uuid.UUID(user_id).bytes).first()
+        if not user:
+            abort(404, message='User not found')
+        return user
+    
+    @marshal_with(user_fields)
+    @admin_required
+    def put(self, user_id):
+        args = user_args.parse_args()
+        user = User.query.filter_by(user_id=uuid.UUID(user_id).bytes).first()
+        if not user:
+            abort(404, message='User not found')
+        user.username = args['username']
+        user.password = args['password']
+        user.role = args['role']
+        user.customer_id = args['customer_id']
+        db.session.commit()
+        return user
+    
+    @admin_required
+    def delete(self, user_id):
+        user = User.query.filter_by(user_id=uuid.UUID(user_id).bytes).first()
+        if not user:
+            abort(404, message='User not found')
+        db.session.delete(user)
+        db.session.commit()
+        return {'message': f'User {user_id} deleted successfully'}, 200
+
 class BranchResourceAll(Resource):
     @marshal_with(branch_fields)
+    @admin_required
     def get(self):
         branch = Branch.query.all()
         return branch
 
     @marshal_with(branch_fields)
+    @admin_required
     def post(self):
         args = branch_args.parse_args()
         branch = Branch(
@@ -472,16 +591,18 @@ class BranchResourceAll(Resource):
 
 class BranchResource(Resource):
     @marshal_with(branch_fields)
+    @admin_required
     def get(self, branch_id):
-        branch = Branch.query.filter_by(branch_id=branch_id).first()
+        branch = Branch.query.filter_by(branch_id=uuid.UUID(branch_id).bytes).first()
         if not branch:
             abort(404, message='Branch not found')
         return branch
     
     @marshal_with(branch_fields)
+    @admin_required
     def put(self, branch_id):
         args = branch_args.parse_args()
-        branch = Branch.query.filter_by(branch_id=branch_id).first()
+        branch = Branch.query.filter_by(branch_id=uuid.UUID(branch_id).bytes).first()
         if not branch:
             abort(404, message='Branch not found')
         branch.branch_name = args['branch_name']
@@ -493,8 +614,9 @@ class BranchResource(Resource):
         db.session.commit()
         return branch
     
+    @admin_required
     def delete(self, branch_id):
-        branch = Branch.query.filter_by(branch_id=branch_id).first()
+        branch = Branch.query.filter_by(branch_id=uuid.UUID(branch_id).bytes).first()
         if not branch:
             abort(404, message='Branch not found')
         db.session.delete(branch)
@@ -503,11 +625,13 @@ class BranchResource(Resource):
 
 class CustomerResourceAll(Resource):
     @marshal_with(customer_fields)
+    @admin_required
     def get(self):
         customers = Customer.query.all()
         return customers
     
     @marshal_with(customer_fields)
+    @admin_required
     def post(self):
         args = customer_args.parse_args()
         customer = Customer(
@@ -529,16 +653,21 @@ class CustomerResourceAll(Resource):
 
 class CustomerResource(Resource):
     @marshal_with(customer_fields)
+    @user_or_admin_required
     def get(self, customer_id):
+        claims = get_jwt()
+        if claims['role'] == 'USER' and claims['customer_id'] != customer_id:
+            return {'error': 'Access denied'}, 403
         customer = Customer.query.filter_by(customer_id=customer_id).first()
         if not customer:
             abort(404, message='Customer not found')
         return customer
     
     @marshal_with(customer_fields)
+    @admin_required
     def put(self, customer_id):
         args = customer_args.parse_args()
-        customer = Customer.query.filter_by(customer_id=customer_id).first()
+        customer = Customer.query.filter_by(customer_id=uuid.UUID(customer_id).bytes).first()
         if not customer:
             abort(404, message='Customer not found')
         customer.first_name = args['first_name']
@@ -554,8 +683,9 @@ class CustomerResource(Resource):
         db.session.commit()
         return customer
     
+    @admin_required
     def delete(self, customer_id):
-        customer = Customer.query.filter_by(customer_id=customer_id).first()
+        customer = Customer.query.filter_by(customer_id=uuid.UUID(customer_id).bytes).first()
         if not customer:
             abort(404, message='Customer not found')
         db.session.delete(customer)
@@ -564,11 +694,13 @@ class CustomerResource(Resource):
 
 class AccountResourceAll(Resource):
     @marshal_with(account_fields)
+    @admin_required
     def get(self):
         accounts = Account.query.all()
         return accounts
     
     @marshal_with(account_fields)
+    @admin_required
     def post(self):
         args = account_args.parse_args()
         account = Account(
@@ -585,16 +717,18 @@ class AccountResourceAll(Resource):
 
 class AccountResource(Resource):
     @marshal_with(account_fields)
+    @admin_required
     def get(self, account_id):
-        account = Account.query.filter_by(account_id=account_id).first()
+        account = Account.query.filter_by(account_id=uuid.UUID(account_id).bytes).first()
         if not account:
             abort(404, message='Account not found')
         return account
     
     @marshal_with(account_fields)
+    @admin_required
     def put(self, account_id):
         args = account_args.parse_args()
-        account = Account.query.filter_by(account_id=account_id).first()
+        account = Account.query.filter_by(account_id=uuid.UUID(account_id).bytes).first()
         if not account:
             abort(404, message='Account not found')
         account.customer_id = args['customer_id']
@@ -605,8 +739,9 @@ class AccountResource(Resource):
         db.session.commit()
         return account
     
+    @admin_required
     def delete(self, account_id):
-        account = Account.query.filter_by(account_id=account_id).first()
+        account = Account.query.filter_by(account_id=uuid.UUID(account_id).bytes).first()
         if not account:
             abort(404, message='Account not found')
         db.session.delete(account)
@@ -615,11 +750,13 @@ class AccountResource(Resource):
 
 class LoanResourceAll(Resource):
     @marshal_with(loan_fields)
+    @admin_required
     def get(self):
         loans = Loan.query.all()
         return loans
     
     @marshal_with(loan_fields)
+    @admin_required
     def post(self):
         args = loan_args.parse_args()
         loan = Loan(
@@ -638,16 +775,18 @@ class LoanResourceAll(Resource):
     
 class LoanResource(Resource):
     @marshal_with(loan_fields)
+    @admin_required
     def get(self, loan_id):
-        loan = Loan.query.filter_by(loan_id=loan_id).first()
+        loan = Loan.query.filter_by(loan_id=uuid.UUID(loan_id).bytes).first()
         if not loan:
             abort(404, message='Loan not found')
         return loan
     
     @marshal_with(loan_fields)
+    @admin_required
     def put(self, loan_id):
         args = loan_args.parse_args()
-        loan = Loan.query.filter_by(loan_id=loan_id).first()
+        loan = Loan.query.filter_by(loan_id=uuid.UUID(loan_id).bytes).first()
         if not loan:
             abort(404, message='Loan not found')
         loan.customer_id = args['customer_id']
@@ -660,8 +799,9 @@ class LoanResource(Resource):
         db.session.commit()
         return loan
     
+    @admin_required
     def delete(self, loan_id):
-        loan = Loan.query.filter_by(loan_id=loan_id).first()
+        loan = Loan.query.filter_by(loan_id=uuid.UUID(loan_id).bytes).first()
         if not loan:
             abort(404, message='Loan not found')
         db.session.delete(loan)
@@ -670,11 +810,13 @@ class LoanResource(Resource):
 
 class LoanPaymentResourceAll(Resource):
     @marshal_with(loan_payment_fields)
+    @admin_required
     def get(self):
         loan_payments = LoanPayment.query.all()
         return loan_payments
     
     @marshal_with(loan_payment_fields)
+    @admin_required
     def post(self):
         args = loan_payment_args.parse_args()
         loan_payment = LoanPayment(
@@ -690,16 +832,18 @@ class LoanPaymentResourceAll(Resource):
     
 class LoanPaymentResource(Resource):
     @marshal_with(loan_payment_fields)
+    @admin_required
     def get(self, loan_payment_id):
-        loan_payment = LoanPayment.query.filter_by(loan_payment_id=loan_payment_id).first()
+        loan_payment = LoanPayment.query.filter_by(loan_payment_id=uuid.UUID(loan_payment_id).bytes).first()
         if not loan_payment:
             abort(404, message='Loan payment not found')
         return loan_payment
     
     @marshal_with(loan_payment_fields)
+    @admin_required
     def put(self, loan_payment_id):
         args = loan_payment_args.parse_args()
-        loan_payment = LoanPayment.query.filter_by(loan_payment_id=loan_payment_id).first()
+        loan_payment = LoanPayment.query.filter_by(loan_payment_id=uuid.UUID(loan_payment_id).bytes).first()
         if not loan_payment:
             abort(404, message='Loan payment not found')
         loan_payment.loan_id = args['loan_id']
@@ -709,8 +853,9 @@ class LoanPaymentResource(Resource):
         db.session.commit()
         return loan_payment
     
+    @admin_required
     def delete(self, loan_payment_id):
-        loan_payment = LoanPayment.query.filter_by(loan_payment_id=loan_payment_id).first()
+        loan_payment = LoanPayment.query.filter_by(loan_payment_id=uuid.UUID(loan_payment_id).bytes).first()
         if not loan_payment:
             abort(404, message='Loan payment not found')
         db.session.delete(loan_payment)
@@ -719,11 +864,13 @@ class LoanPaymentResource(Resource):
     
 class EmployeeResourceAll(Resource):
     @marshal_with(employee_fields)
+    @admin_required
     def get(self):
         employees = Employee.query.all()
         return employees
     
     @marshal_with(employee_fields)
+    @admin_required
     def post(self):
         args = employee_args.parse_args()
         employee = Employee(
@@ -742,16 +889,18 @@ class EmployeeResourceAll(Resource):
 
 class EmployeeResource(Resource):
     @marshal_with(employee_fields)
+    @admin_required
     def get(self, employee_id):
-        employee = Employee.query.filter_by(employee_id=employee_id).first()
+        employee = Employee.query.filter_by(employee_id=uuid.UUID(employee_id).bytes).first()
         if not employee:
             abort(404, message='Employee not found')
         return employee
     
     @marshal_with(employee_fields)
+    @admin_required
     def put(self, employee_id):
         args = employee_args.parse_args()
-        employee = Employee.query.filter_by(employee_id=employee_id).first()
+        employee = Employee.query.filter_by(employee_id=uuid.UUID(employee_id).bytes).first()
         if not employee:
             abort(404, message='Employee not found')
         employee.branch_id = args['branch_id']
@@ -764,8 +913,9 @@ class EmployeeResource(Resource):
         db.session.commit()
         return employee
     
+    @admin_required
     def delete(self, employee_id):
-        employee = Employee.query.filter_by(employee_id=employee_id).first()
+        employee = Employee.query.filter_by(employee_id=uuid.UUID(employee_id).bytes).first()
         if not employee:
             abort(404, message='Employee not found')
         db.session.delete(employee)
@@ -774,6 +924,7 @@ class EmployeeResource(Resource):
     
 class CardResourceAll(Resource):
     @marshal_with(card_fields)
+    @admin_required
     def get(self):
         cards = Card.query.all()
         return cards
@@ -796,16 +947,18 @@ class CardResourceAll(Resource):
     
 class CardResource(Resource):
     @marshal_with(card_fields)
+    @admin_required
     def get(self, card_id):
-        card = Card.query.filter_by(card_id=card_id).first()
+        card = Card.query.filter_by(card_id=uuid.UUID(card_id).bytes).first()
         if not card:
             abort(404, message='Card not found')
         return card
     
     @marshal_with(card_fields)
+    @admin_required
     def put(self, card_id):
         args = card_args.parse_args()
-        card = Card.query.filter_by(card_id=card_id).first()
+        card = Card.query.filter_by(card_id=uuid.UUID(card_id).bytes).first()
         if not card:
             abort(404, message='Card not found')
         card.account_id = args['account_id']
@@ -817,8 +970,9 @@ class CardResource(Resource):
         db.session.commit()
         return card
     
+    @admin_required
     def delete(self, card_id):
-        card = Card.query.filter_by(card_id=card_id).first()
+        card = Card.query.filter_by(card_id=uuid.UUID(card_id).bytes).first()
         if not card:
             abort(404, message='Card not found')
         db.session.delete(card)
@@ -827,11 +981,13 @@ class CardResource(Resource):
     
 class TransactionResourceAll(Resource):
     @marshal_with(transaction_fields)
+    @admin_required
     def get(self):
         transactions = Transaction.query.all()
         return transactions
     
     @marshal_with(transaction_fields)
+    @admin_required
     def post(self):
         args = transaction_args.parse_args()
         transaction = Transaction(
@@ -848,16 +1004,18 @@ class TransactionResourceAll(Resource):
     
 class TransactionResource(Resource):
     @marshal_with(transaction_fields)
+    @admin_required
     def get(self, transaction_id):
-        transaction = Transaction.query.filter_by(transaction_id=transaction_id).first()
+        transaction = Transaction.query.filter_by(transaction_id=uuid.UUID(transaction_id).bytes).first()
         if not transaction:
             abort(404, message='Transaction not found')
         return transaction
     
     @marshal_with(transaction_fields)
+    @admin_required
     def put(self, transaction_id):
         args = transaction_args.parse_args()
-        transaction = Transaction.query.filter_by(transaction_id=transaction_id).first()
+        transaction = Transaction.query.filter_by(transaction_id=uuid.UUID(transaction_id).bytes).first()
         if not transaction:
             abort(404, message='Transaction not found')
         transaction.from_account_id = args['from_account_id']
@@ -868,8 +1026,9 @@ class TransactionResource(Resource):
         db.session.commit()
         return transaction
     
+    @admin_required
     def delete(self, transaction_id):
-        transaction = Transaction.query.filter_by(transaction_id=transaction_id).first()
+        transaction = Transaction.query.filter_by(transaction_id=uuid.UUID(transaction_id).bytes).first()
         if not transaction:
             abort(404, message='Transaction not found')
         db.session.delete(transaction)
@@ -878,11 +1037,13 @@ class TransactionResource(Resource):
     
 class CustomerSupportResourceAll(Resource):
     @marshal_with(customer_support_fields)
+    @admin_required
     def get(self):
         customer_supports = CustomerSupport.query.all()
         return customer_supports
     
     @marshal_with(customer_support_fields)
+    @admin_required
     def post(self):
         args = customer_support_args.parse_args()
         customer_support = CustomerSupport(
@@ -900,16 +1061,18 @@ class CustomerSupportResourceAll(Resource):
     
 class CustomerSupportResource(Resource):
     @marshal_with(customer_support_fields)
+    @admin_required
     def get(self, ticket_id):
-        customer_support = CustomerSupport.query.filter_by(ticket_id=ticket_id).first()
+        customer_support = CustomerSupport.query.filter_by(ticket_id=uuid.UUID(ticket_id).bytes).first()
         if not customer_support:
             abort(404, message='Customer support ticket not found')
         return customer_support
     
     @marshal_with(customer_support_fields)
+    @admin_required
     def put(self, ticket_id):
         args = customer_support_args.parse_args()
-        customer_support = CustomerSupport.query.filter_by(ticket_id=ticket_id).first()
+        customer_support = CustomerSupport.query.filter_by(ticket_id=uuid.UUID(ticket_id).bytes).first()
         if not customer_support:
             abort(404, message='Customer support ticket not found')
         customer_support.customer_id = args['customer_id']
@@ -921,8 +1084,9 @@ class CustomerSupportResource(Resource):
         db.session.commit()
         return customer_support
     
+    @admin_required
     def delete(self, ticket_id):
-        customer_support = CustomerSupport.query.filter_by(ticket_id=ticket_id).first()
+        customer_support = CustomerSupport.query.filter_by(ticket_id=uuid.UUID(ticket_id).bytes).first()
         if not customer_support:
             abort(404, message='Customer support ticket not found')
         db.session.delete(customer_support)
@@ -931,11 +1095,13 @@ class CustomerSupportResource(Resource):
     
 class CreditScoreResourceAll(Resource):
     @marshal_with(credit_score_fields)
+    @admin_required
     def get(self):
         credit_scores = CreditScore.query.all()
         return credit_scores
     
     @marshal_with(credit_score_fields)
+    @admin_required
     def post(self):
         args = credit_score_args.parse_args()
         credit_score = CreditScore(
@@ -951,16 +1117,18 @@ class CreditScoreResourceAll(Resource):
     
 class CreditScoreResource(Resource):
     @marshal_with(credit_score_fields)
+    @admin_required
     def get(self, credit_score_id):
-        credit_score = CreditScore.query.filter_by(credit_score_id=credit_score_id).first()
+        credit_score = CreditScore.query.filter_by(credit_score_id=uuid.UUID(credit_score_id).bytes).first()
         if not credit_score:
             abort(404, message='Credit score not found')
         return credit_score
     
     @marshal_with(credit_score_fields)
+    @admin_required
     def put(self, credit_score_id):
         args = credit_score_args.parse_args()
-        credit_score = CreditScore.query.filter_by(credit_score_id=credit_score_id).first()
+        credit_score = CreditScore.query.filter_by(credit_score_id=uuid.UUID(credit_score_id).bytes).first()
         if not credit_score:
             abort(404, message='Credit score not found')
         credit_score.customer_id = args['customer_id']
@@ -970,8 +1138,9 @@ class CreditScoreResource(Resource):
         db.session.commit()
         return credit_score
     
+    @admin_required
     def delete(self, credit_score_id):
-        credit_score = CreditScore.query.filter_by(credit_score_id=credit_score_id).first()
+        credit_score = CreditScore.query.filter_by(credit_score_id=uuid.UUID(credit_score_id).bytes).first()
         if not credit_score:
             abort(404, message='Credit score not found')
         db.session.delete(credit_score)
@@ -979,26 +1148,28 @@ class CreditScoreResource(Resource):
         return {'message': f'Credit score {credit_score_id} deleted successfully'}, 200
     
 resources = [
+    (UserResourceAll, '/api/user/'),
+    (UserResource, '/api/user/<str:user_id>'),
     (BranchResourceAll, '/api/branch/'),
-    (BranchResource, '/api/branch/<int:branch_id>'),
+    (BranchResource, '/api/branch/<str:branch_id>'),
     (CustomerResourceAll, '/api/customer/'),
-    (CustomerResource, '/api/customer/<int:customer_id>'),
+    (CustomerResource, '/api/customer/<str:customer_id>'),
     (AccountResourceAll, '/api/account/'),
-    (AccountResource, '/api/account/<int:account_id>'),
+    (AccountResource, '/api/account/<str:account_id>'),
     (LoanResourceAll, '/api/loan/'),
-    (LoanResource, '/api/loan/<int:loan_id>'),
+    (LoanResource, '/api/loan/<str:loan_id>'),
     (LoanPaymentResourceAll, '/api/loanpayment/'),
-    (LoanPaymentResource, '/api/loanpayment/<int:loan_payment_id>'),
+    (LoanPaymentResource, '/api/loanpayment/<str:loan_payment_id>'),
     (EmployeeResourceAll, '/api/employee/'),
-    (EmployeeResource, '/api/employee/<int:employee_id>'),
+    (EmployeeResource, '/api/employee/<str:employee_id>'),
     (CardResourceAll, '/api/card/'),
-    (CardResource, '/api/card/<int:card_id>'),
+    (CardResource, '/api/card/<str:card_id>'),
     (TransactionResourceAll, '/api/transaction/'),
-    (TransactionResource, '/api/transaction/<int:transaction_id>'),
+    (TransactionResource, '/api/transaction/<str:transaction_id>'),
     (CustomerSupportResourceAll, '/api/customersupport/'),
-    (CustomerSupportResource, '/api/customersupport/<int:ticket_id>'),
+    (CustomerSupportResource, '/api/customersupport/<str:ticket_id>'),
     (CreditScoreResourceAll, '/api/creditscore/'),
-    (CreditScoreResource, '/api/creditscore/<int:credit_score_id>')
+    (CreditScoreResource, '/api/creditscore/<str:credit_score_id>')
 ]
 
 for resource, route in resources:
@@ -1019,7 +1190,7 @@ def get_branches_with_conditions(min_employees=5, min_accounts=3):
         FROM Branch B 
         LEFT JOIN Employee E ON B.branch_id = E.branch_id 
         LEFT JOIN Account A ON B.branch_id = A.branch_id 
-        GROUP BY B.branch_name 
+        GROUP BY B.branch_name
         HAVING employee_count > :min_employees AND account_count >= :min_accounts;
     """)
     results = db.session.execute(query, {'min_employees': min_employees, 'min_accounts': min_accounts}).fetchall()
@@ -1045,7 +1216,7 @@ def api_branches_with_conditions():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-def get_customers_with_high_transactions(min_transaction_total=10000):
+def get_customers_with_high_transactions(min_transaction_total):
     """
     Fetch customers who made transactions totaling more than a specified amount.
 
@@ -1096,6 +1267,39 @@ def api_employees_top_resolvers():
 @app.route('/')
 def home():
     return '<h1>Welcome to the Banking API!</h1>'
+
+@app.route('/api/register', methods=['POST'])
+def register():
+    args = user_args.parse_args()
+    username = args['username']
+    password = args['password']
+    role = args.get('role', 'USER')  # Default role is 'USER'
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': 'User already exists'}), 400
+
+    hashed_password = generate_password_hash(password)
+    new_user = User(username=username, password=hashed_password, role=role)
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({'message': 'User registered successfully'}), 201
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    args = user_args.parse_args()
+    username = args['username']
+    password = args['password']
+
+    user = User.query.filter_by(username=username).first()
+    if not user or not check_password_hash(user.password, password):
+        return jsonify({'error': 'Invalid credentials'}), 401
+
+    access_token = create_access_token(identity={
+        'user_id': user.user_id.hex(),
+        'customer_id': user.customer_id.hex() if user.customer_id else None,
+        'role': user.role
+    })
+    return jsonify({'access_token': access_token}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
