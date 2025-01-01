@@ -2,31 +2,46 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import uuid
-from sqlalchemy import text
+import json
+from sqlalchemy import text, exc
 from sqlalchemy.dialects.mysql import BINARY
 from flask_restful import Resource, Api, reqparse, fields, marshal_with, abort
 import re
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from hmac import compare_digest
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///banking_management.db'
 db = SQLAlchemy(app)
 api = Api(app)
-app.config['JWT_SECRET_KEY'] = 'super_secret_key'  # Use a strong, secure secret key
+app.config['JWT_SECRET_KEY'] = 'super_secret_key'
 jwt = JWTManager(app)
 
-@app.route('/api/protected', methods=['GET'])
+@app.route('/api/who-am-i', methods=['GET'])
 @jwt_required()
 def protected():
-    current_user = get_jwt_identity()
-    return jsonify({'message': f'Hello, {current_user["user_id"]}! You have access.'}), 200
+    identity = get_jwt()
+    username = identity['username']
+    role = identity['role']
+    return jsonify({'message': f"Hello, {username}, your role is {role}"})
 
+@jwt.user_identity_loader
+def user_identity_lookup(user):
+    return user
+
+@jwt.user_lookup_loader
+def user_lookup_callback(_jwt_header, jwt_data):
+    identity = jwt_data["sub"] 
+    user_id_uuid = uuid.UUID(hex=identity)
+    user_id_binary = user_id_uuid.bytes 
+    return User.query.filter_by(user_id=user_id_binary).one_or_none() 
+    
 def admin_required(fn):
     @jwt_required()
     def wrapper(*args, **kwargs):
         claims = get_jwt()
-        if claims['role'] != 'ADMIN':
+        if claims.get('role') != 'ADMIN':
             return jsonify({'error': 'Admin access required'}), 403
         return fn(*args, **kwargs)
     return wrapper
@@ -35,8 +50,8 @@ def user_or_admin_required(fn):
     @jwt_required()
     def wrapper(*args, **kwargs):
         claims = get_jwt()
-        if claims.get('role') not in ['ADMIN', 'USER']:
-            return {'error': 'Access denied'}, 403
+        if 'role' not in claims or claims['role'] not in ['ADMIN', 'USER']: # More explicit check
+            return jsonify({'error': 'Access denied'}), 403 # Consistent jsonify
         return fn(*args, **kwargs)
     return wrapper
 
@@ -44,10 +59,6 @@ def user_or_admin_required(fn):
 @admin_required
 def admin_only():
     return jsonify({'message': 'Welcome, Admin!'}), 200
-
-@jwt.user_identity_loader
-def add_claims_to_access_token(identity):
-    return {'user_id': identity['user_id'], 'role': identity['role']}
 
 def generate_uuid():
     return uuid.uuid4().bytes
@@ -61,6 +72,9 @@ class User(db.Model):
     customer_id = db.Column(BINARY(16), db.ForeignKey('customer.customer_id', onupdate='CASCADE', ondelete='RESTRICT'))
 
     customer = db.relationship('Customer', backref='user', uselist=False)
+
+    def check_password(self, password):
+        return compare_digest(password, self.password)
 
     def __repr__(self):
         return f"User(user_id={self.user_id}, username={self.username}, role={self.role})"
@@ -241,7 +255,7 @@ class CreditScore(db.Model):
         
     def __repr__(self):
         return f"CreditScore(credit_score_id = {self.credit_score_id}, customer_id = {self.customer_id}, score = {self.score}, risk_category = {self.risk_category}, computed_by_system = {self.computed_by_system})"
-
+    
 def validate_uuid(value):
     try:
         uuid.UUID(value)
@@ -1294,16 +1308,20 @@ def login():
     username = args['username']
     password = args['password']
 
-    user = User.query.filter_by(username=username).first()
-    if not user or not check_password_hash(user.password, password):
-        return jsonify({'error': 'Invalid credentials'}), 401
+    user = User.query.filter_by(username=username).one_or_none()
+    if not user:
+        return jsonify("User does not exist"), 401
+    
+    if not check_password_hash(user.password, password):
+        return jsonify("Wrong password"), 401
 
-    access_token = create_access_token(identity={
-        'user_id': user.user_id.hex(),
-        'customer_id': user.customer_id.hex() if user.customer_id else None,
-        'role': user.role
-    })
-    return jsonify({'access_token': access_token}), 200
+    additional_claims = {
+        "username": user.username,
+        "role": user.role
+    }
+
+    access_token = create_access_token(identity=user.user_id.hex(), additional_claims=additional_claims)
+    return jsonify(access_token=access_token), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
