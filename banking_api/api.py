@@ -1189,9 +1189,9 @@ def get_branches_with_conditions(min_employees=5, min_accounts=3):
     SELECT B.branch_name, 
        COUNT(DISTINCT E.employee_id) AS employee_count, 
        COUNT(DISTINCT A.account_id) AS account_count 
-        FROM Branch B 
-        LEFT JOIN Employee E ON B.branch_id = E.branch_id 
-        LEFT JOIN Account A ON B.branch_id = A.branch_id 
+        FROM branch B 
+        LEFT JOIN employee E ON B.branch_id = E.branch_id 
+        LEFT JOIN account A ON B.branch_id = A.branch_id 
         GROUP BY B.branch_name
         HAVING employee_count > :min_employees AND account_count >= :min_accounts;
     """)
@@ -1227,9 +1227,9 @@ def get_customers_with_high_transactions(min_transaction_total):
     """
     query = text("""
     SELECT C.customer_id, C.first_name, C.last_name, SUM(T.amount) AS total_transaction
-    FROM Customer C
-    JOIN Account A ON C.customer_id = A.customer_id
-    JOIN "Transaction" T ON A.account_id = T.from_account_id OR A.account_id = T.to_account_id
+    FROM customer C
+    JOIN account A ON C.customer_id = A.customer_id
+    JOIN "transaction" T ON A.account_id = T.from_account_id OR A.account_id = T.to_account_id
     GROUP BY C.customer_id, C.first_name, C.last_name
     HAVING SUM(T.amount) > :min_transaction_total;
     """)
@@ -1252,8 +1252,8 @@ def api_employees_top_resolvers():
     query = text("""
     WITH ResolvedTickets AS (
         SELECT E.employee_id, E.first_name, E.last_name, COUNT(CS.ticket_id) AS resolved_tickets
-        FROM Employee E
-        JOIN Customer_Support CS ON E.employee_id = CS.employee_id
+        FROM employee E
+        JOIN customer_support CS ON E.employee_id = CS.employee_id
         WHERE CS.status = 'RESOLVED'
         GROUP BY E.employee_id, E.first_name, E.last_name
     )
@@ -1264,6 +1264,8 @@ def api_employees_top_resolvers():
     );
     """)
     results = db.session.execute(query).fetchall()
+    if not results:
+        return jsonify({'message': 'No employees found with with meeting criteria.'}), 404
     return jsonify([dict(row) for row in results])
 
 @app.route('/')
