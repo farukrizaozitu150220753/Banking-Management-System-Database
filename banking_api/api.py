@@ -3,7 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import uuid
 import json
-from sqlalchemy import text, exc
+from sqlalchemy import text
 from sqlalchemy.dialects.mysql import BINARY
 from flask_restful import Resource, Api, reqparse, fields, marshal_with, abort
 import re
@@ -258,7 +258,7 @@ class CreditScore(db.Model):
     
 def validate_uuid(value):
     try:
-        uuid.UUID(value)
+        uuid.UUID(hex=value)
         return value
     except ValueError:
         raise ValueError('Invalid UUID format')
@@ -418,6 +418,11 @@ credit_score_args.add_argument('customer_id', type=validate_uuid, required=True,
 credit_score_args.add_argument('score', type=float, required=True, help='Credit score is required and should be a numeric value')
 credit_score_args.add_argument('risk_category', type=str, required=True, help='Risk category is required')
 credit_score_args.add_argument('computed_by_system', type=bool, help='Computed by system is required and should be a boolean')
+
+money_transfer_args = reqparse.RequestParser()
+money_transfer_args.add_argument('sender_account_id', type=validate_uuid, required=True, help='Sender account UUID is required')
+money_transfer_args.add_argument('receiver_account_id', type=validate_uuid, required=True, help='Receiver account UUID is required')
+money_transfer_args.add_argument('amount', type=validate_positive_number, required=True, help='Money amount is required')
 
 user_fields = {
     'user_id': fields.String,
@@ -1213,6 +1218,7 @@ def get_branches_with_conditions(min_employees=5, min_accounts=3):
     return [dict(row) for row in results]
 
 @app.route('/api/branches', methods=['GET'])
+@admin_required
 def api_branches_with_conditions():
     """
     API endpoint to fetch branches with a minimum number of employees and accounts.
@@ -1251,6 +1257,7 @@ def get_customers_with_high_transactions(min_transaction_total):
     return [dict(row) for row in results]
 
 @app.route('/api/customer/high-transactions', methods=['GET'])
+@admin_required
 def api_customers_high_transactions():
     """
     API endpoint to fetch customers who made transactions totaling more than a specified amount.
@@ -1262,6 +1269,7 @@ def api_customers_high_transactions():
     return jsonify(results)
 
 @app.route('/api/employee/top-resolvers', methods=['GET'])
+@admin_required
 def api_employees_top_resolvers():
     query = text("""
     WITH ResolvedTickets AS (
@@ -1317,11 +1325,68 @@ def login():
 
     additional_claims = {
         "username": user.username,
-        "role": user.role
+        "role": user.role,
+        "customer_id": user.customer_id.hex()
     }
 
     access_token = create_access_token(identity=user.user_id.hex(), additional_claims=additional_claims)
     return jsonify(access_token=access_token), 200
+
+@app.route('/api/money-transfer', methods=['POST'])
+@jwt_required
+def money_transfer():
+    identity = get_jwt()
+    
+    if not identity['customer_id']:
+        return jsonify({'error': 'customer_id is None'}), 404
+
+    sender_customer_id = uuid.UUID(hex=identity['customer_id']).bytes
+    sender_customer = Customer.query.filter_by(customer_id=sender_customer_id).one_or_none()
+    if not sender_customer:
+        return jsonify({'error': 'No customer exists with this customer_id'}), 404
+    
+    args = money_transfer_args.parse_args()
+    sender_account_id = args['sender_account_id']
+    receiver_account_id = args['receiver_account_id']
+    amount = args['amount']
+
+    sender_account = Account.query.filter_by(account_id=uuid.UUID(hex=sender_account_id).bytes).one_or_none()
+    if not sender_account:
+        return jsonify({'error': 'No account exists with this account_id sender'}), 404
+    
+    if sender_account.customer_id != sender_customer_id:
+        return jsonify({'error': 'Access denied: This account is not connected with claimed customer_id'}), 403
+
+    receiver_account = Account.query.filter_by(account_id=uuid.UUID(hex=receiver_account_id).bytes).one_or_none()
+    if not receiver_account:
+        return jsonify({'error': 'No account exists with this account_id receiver'}), 404
+
+    if sender_account.balance < amount:
+        return jsonify({'error': 'Insufficient balance'})
+    
+    sender_account.balance -= amount
+    receiver_account.balance += amount
+
+    transaction_timestamp=datetime.now()
+    
+    new_transaction = Transaction(
+        from_account_id=uuid.UUID(hex=sender_account_id).bytes,
+        to_account_id=uuid.UUID(hex=receiver_account_id).bytes,
+        transaction_type='TRANSFER',
+        amount=amount,
+        transaction_timestamp=transaction_timestamp
+    )
+    db.session.add(new_transaction)
+    db.session.commit()
+
+    return jsonify({
+        'message': f'Money transfer is successfull',
+        'sender_account_id': sender_account_id,
+        'receiver_account_id': receiver_account_id,
+        'transaction_type': 'TRANSFER',
+        'amount': amount,
+        'transaction_timestamp': transaction_timestamp
+    }), 201
 
 if __name__ == '__main__':
     app.run(debug=True)
