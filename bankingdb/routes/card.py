@@ -17,6 +17,8 @@ def create_card():
     ---
     tags:
       - Cards
+    security:
+      - BearerAuth: []
     parameters:
       - name: body
         in: body

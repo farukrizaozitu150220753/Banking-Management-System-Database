@@ -91,6 +91,8 @@ def get_users():
     ---
     tags:
       - Users
+    security:
+      - BearerAuth: []
     responses:
       200:
         description: List of users
@@ -118,8 +120,8 @@ def get_users():
         description: Internal server error
     """
     try:
-        connection = get_db_connection().cursor()
-        cursor = connection.cursor(dictionary=True)
+        connection = get_db_connection()
+        cursor = connection.cursor()
         cursor.execute("SELECT user_id, username, role, customer_id FROM user")
         users = cursor.fetchall()
         cursor.close()
@@ -138,6 +140,8 @@ def get_user(user_id):
     ---
     tags:
       - Users
+    security:
+      - BearerAuth: []  
     parameters:
       - name: user_id
         in: path
@@ -198,6 +202,8 @@ def update_user(user_id):
     ---
     tags:
       - Users
+    security:
+      - BearerAuth: []
     parameters:
       - name: user_id
         in: path
@@ -297,6 +303,8 @@ def delete_user(user_id):
     ---
     tags:
       - Users
+    security:
+      - BearerAuth: []    
     parameters:
       - name: user_id
         in: path
